@@ -12,9 +12,9 @@
 #pragma mark - Squircle silhouette
 
 // Control points recovered from __TEXT:0x10d30, expressed as fractions of the
-// icon edge. Walking them with the standard four-segment corner construction
-// yields the same continuous-corner shape iOS uses.
-static const double kFGSquirclePoints[] = {
+// icon edge. Kept as reference data; the current path below uses cubic curves
+// directly rather than reading this table.
+static const double kFGSquirclePoints[] __attribute__((unused)) = {
     0.656f, 0.755f, 0.8046f,
     0.01686f, 0.0380f, 0.0839f, 0.1420f, 0.1954f, 0.2449f, 0.3440f,
     0.8580f, 0.9160f, 0.9620f, 0.9830f,

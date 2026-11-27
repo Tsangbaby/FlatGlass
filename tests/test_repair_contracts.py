@@ -196,6 +196,17 @@ class FlatGlassRepairContracts(unittest.TestCase):
         self.assertFalse('"/var/jb/var/mobile/' in daemon, "mobile preferences are not package payload")
         self.assertIn("Architecture: iphoneos-arm\n", source("control"))
 
+    def test_catalog_storage_getters_use_arc_typed_object_dispatch(self):
+        catalog = source("FlatGlassIconServices/FGCatalog.m")
+        for start, end in (("static NSArray *FGArrayForSelector(", "static NSDictionary *FGDictionaryForSelector("),
+                           ("static NSDictionary *FGDictionaryForSelector(", "NGCatalogIndex *FGIndexForResource(")):
+            with self.subTest(getter=start):
+                body = between(catalog, start, end)
+                self.assertIn("[object respondsToSelector:sel]", body)
+                self.assertIn("((id (*)(id, SEL))objc_msgSend)(object, sel)", body)
+                self.assertNotIn("performSelector:", body)
+                self.assertIn("@catch", body)
+
     def test_roothide_install_paths_use_jbroot_for_jailbreak_owned_files(self):
         makefile = source("Makefile")
         self.assertIn("THEOS_PACKAGE_SCHEME),roothide)", makefile)

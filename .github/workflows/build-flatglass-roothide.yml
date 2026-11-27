@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-          make -j1 package messages=yes FINALPACKAGE=1 INSTALL=0 THEOS_PACKAGE_SCHEME=roothide \
+          make -k -j1 package messages=yes FINALPACKAGE=1 INSTALL=0 THEOS_PACKAGE_SCHEME=roothide \
             THEOS_PLATFORM_SDK_ROOT="$DEVELOPER_DIR" SYSROOT="$sdk" ISYSROOT="$sdk" \
             THEOS_PLATFORM_DEB_COMPRESSION_TYPE=xz 2>&1 | tee "$FLATGLASS_ARTIFACT_DIR/theos-build.log"
           debs=(packages/*.deb)

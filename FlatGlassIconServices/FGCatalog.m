@@ -6,6 +6,7 @@
 #import "FGCatalog.h"
 #import "FGCommon.h"
 #import "FGLog.h"
+#import <objc/message.h>
 #import <objc/runtime.h>
 #import <string.h>
 
@@ -97,7 +98,7 @@ static NSArray *FGArrayForSelector(id object, NSString *name) {
     SEL sel = NSSelectorFromString(name);
     if (![object respondsToSelector:sel]) return nil;
     @try {
-        id value = [object performSelector:sel];
+        id value = ((id (*)(id, SEL))objc_msgSend)(object, sel);
         return [value isKindOfClass:[NSArray class]] ? value : nil;
     } @catch (__unused NSException *e) {
         return nil;
@@ -108,7 +109,7 @@ static NSDictionary *FGDictionaryForSelector(id object, NSString *name) {
     SEL sel = NSSelectorFromString(name);
     if (![object respondsToSelector:sel]) return nil;
     @try {
-        id value = [object performSelector:sel];
+        id value = ((id (*)(id, SEL))objc_msgSend)(object, sel);
         return [value isKindOfClass:[NSDictionary class]] ? value : nil;
     } @catch (__unused NSException *e) {
         return nil;
