@@ -1,0 +1,7 @@
+"mode" = "Mode";
+"remove" = "Remove Highlights";
+"edge" = "Edge Only";
+"artwork" = "Edge and Artwork";
+"off" = "Off";
+"footer" = "Edge Only adds a thin highlight around the icon. Edge and Artwork also lights the artwork.";
+"save_failed" = "Could not save the selected mode.";

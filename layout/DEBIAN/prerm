@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+prefix='/var/jb'
+PATH="$prefix/usr/bin:$prefix/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
+case "$1" in
+  remove|deconfigure) "$prefix/usr/libexec/flatglass" --disable ;;
+esac
+launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
+  launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||
+  launchctl unload "$job" >/dev/null 2>&1 || true

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Edge Only adds a thin highlight around the icon. Edge and Artwork also lights the artwork.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>0</integer>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>get</key>
+			<string>readMode:</string>
+			<key>key</key>
+			<string>Mode</string>
+			<key>label</key>
+			<string>Mode</string>
+			<key>set</key>
+			<string>writeMode:specifier:</string>
+			<key>validTitles</key>
+			<array>
+				<string>Remove Highlights</string>
+				<string>Edge Only</string>
+				<string>Edge and Artwork</string>
+				<string>Off</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>3</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+			</array>
+		</dict>
+	</array>
+	<key>title</key>
+	<string>FlatGlass</string>
+</dict>
+</plist>
