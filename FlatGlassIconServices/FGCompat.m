@@ -7,6 +7,7 @@
 #import "FGCommon.h"
 #import "FGLog.h"
 #import "FGRender.h"
+#import "FGDiagnostics.h"
 
 #import <unistd.h>
 
@@ -39,7 +40,7 @@ BOOL FGIsImageRenderer(Method m) {
     return arg3[0] == 'd';
 }
 
-void FGInvalidateCacheIfNeeded(uint64_t state) {
+void FGInvalidateCacheIfNeeded(uint64_t state, bool fromNotification) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *stampPath = [kFGCacheRoot stringByAppendingPathComponent:@".flatglass-mode"];
     NSString *wanted = [NSString stringWithFormat:@"1:%llu", state];
@@ -49,12 +50,14 @@ void FGInvalidateCacheIfNeeded(uint64_t state) {
                                                  encoding:NSUTF8StringEncoding
                                                     error:&error];
     if ([current isEqualToString:wanted]) {
+        FGDAgentRecord(FGDCacheFlag(FGD_CACHE_ALREADY, fromNotification));
         FGLogf(@"cache already stamped %@", wanted);
         return;
     }
 
     NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:kFGCacheRoot error:&error];
     if (!entries) {
+        FGDAgentRecord(FGDCacheFlag(FGD_CACHE_DIR_UNREADABLE, fromNotification));
         // Directory may not exist yet on a freshly booted device; creating it
         // through the stamp write below is enough.
         FGLogf(@"icon cache unreadable: %@", error.localizedDescription);
@@ -70,8 +73,10 @@ void FGInvalidateCacheIfNeeded(uint64_t state) {
     // forever; the original exits so launchd restarts it with a clean slate.
     if (![wanted writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
         FGLogf(@"stamp write failed: %@", error.localizedDescription);
+        FGDAgentTerminalWriteFailure(state, fromNotification);
         _exit(0);
     }
+    FGDAgentRecord(FGDCacheFlag(FGD_CACHE_WRITE_OK, fromNotification));
 }
 
 BOOL FGInstallHooks(void) {

@@ -1,13 +1,13 @@
 Package: local.lumid.flatglass
-Name: FlatGlass
-Version: 1.8.4
+Name: FlatGlass (Diagnostic)
+Version: 1.8.4+diag.1
 Architecture: iphoneos-arm
 Depends: firmware (>= 15.0), mobilesubstrate, preferenceloader
 Section: Tweaks
 Maintainer: lumid
 Author: lumid
 Icon: file:///var/jb/Library/PreferenceBundles/FlatGlassPrefs.bundle/icon@3x.png
-Description: Customize the highlights on your Home Screen icons.
+Description: Temporary diagnostic for Home Screen icon mode delivery.
  .
  Reconstructed source tree. Same package identifier, same four components,
  same notify chain as the shipped 1.8.4 build.

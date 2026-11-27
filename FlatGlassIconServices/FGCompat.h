@@ -17,6 +17,7 @@
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#include <stdbool.h>
 
 /// TRUE when `m` looks like `- (id)imageForSize:(CGSize)size scale:(double)scale`:
 /// exactly four arguments (self, _cmd, size, scale), object return type,
@@ -29,7 +30,7 @@ BOOL FGInstallHooks(void);
 
 /// Re-reads the notify state and drops the on-disk icon cache when the mode
 /// changed since the last run. `state` is the value published by the daemon.
-void FGInvalidateCacheIfNeeded(uint64_t state);
+void FGInvalidateCacheIfNeeded(uint64_t state, bool fromNotification);
 
 /// The original implementations, captured before the swap. Used as the
 /// fall-through path whenever the tweak cannot render (no stack, bad size,

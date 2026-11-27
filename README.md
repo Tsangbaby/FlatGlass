@@ -1,6 +1,7 @@
 # FlatGlass 1.8.4 — reconstructed source tree
 
-Package `local.lumid.flatglass` 1.8.4. This is a repaired reconstruction from
+Package `local.lumid.flatglass` 1.8.4+diag.1, a diagnostic of the 1.8.4 build.
+This is a repaired reconstruction from
 the release binaries, not the author's original source or an installable
 package. It retains the four components and their notify chain.
 
@@ -51,6 +52,35 @@ Mode values are **not** in display order — this trips people up:
 | Edge and Artwork | 1 | 2 |
 | Off | 2 | 3 |
 | Edge Only | 3 | 4 |
+
+### RootHide diagnostic D1
+
+The diagnostic is not a rendering repair. It leaves the install jobs, render
+hook checks, regular notify lifetime, refresh route and cache actions intact.
+Two separate local diagnostic channels let the existing daemon collect agent
+results without adding a subscriber to the production mode name. No report is
+uploaded. The only new device file is the mode-0600 report
+`/var/mobile/Library/Preferences/FlatGlassDiagnostics-d1.plist`.
+
+- `initial` and `change` retain the startup and last settings-change publish
+  attempts, including register/set/cancel/post return codes. `0` status is
+  success, not an acknowledgement by a consumer. `changes` counts observed
+  publisher callbacks, not user taps. `watch_status` describes the subscription.
+- `agent_flags` is cumulative within the report, with separate bit ranges for
+  startup and notification reads and their marker outcomes (see `FGDiagnostics.h`).
+  `startup_read` and `notification_read` are summaries: `0` is an observed zero,
+  `-1` is no successful read observed, `-2` is mixed or other. The raw bits also
+  distinguish a reported read failure from no event. Hook acceptance means at
+  least one original install gate passed, not evidence of rendered pixels.
+- `terminal_cache_write_failed` records a failure notification sent immediately
+  before the existing process exit. `terminal_flags` can also carry its coarse
+  read context. The two channel statuses describe collector registration, not
+  the sender's delivery. The writer replaces a bounded snapshot, not an event
+  history. Across agent restarts bits may describe different invocations.
+
+For a single reproduction, use a fresh report with a settings-change sample.
+An absent/invalid report, or missing agent events with no positive agent signal,
+cannot distinguish a missed diagnostic event from a did-not-load outcome.
 
 ---
 

@@ -32,6 +32,7 @@
 
 #import "FGCommon.h"
 #import "FGLog.h"
+#import "FGDiagnostics.h"
 
 #ifndef FG_INSTALL_PREFIX
 #define FG_INSTALL_PREFIX @""
@@ -153,18 +154,29 @@ static NSInteger FGReadMode(void) {
     return [value isKindOfClass:[NSNumber class]] ? [value integerValue] : 0;
 }
 
-static BOOL FGPublishMode(NSInteger mode) {
+static BOOL FGPublishMode(NSInteger mode, bool fromChange) {
     int token = 0;
-    if (notify_register_check(FG_NOTIFY_MODE, &token) != NOTIFY_STATUS_OK) return NO;
+    uint32_t registerStatus = notify_register_check(FG_NOTIFY_MODE, &token);
+    if (registerStatus != NOTIFY_STATUS_OK) {
+        FGDRecordPublish((FGDPublish){mode >= 0 && mode <= 3 ? (int)mode : FGD_OTHER,
+                         FGD_UNOBSERVED, FGDStatus(registerStatus), FGD_UNOBSERVED,
+                         FGD_UNOBSERVED, FGD_UNOBSERVED}, fromChange);
+        return NO;
+    }
 
     // Modes are 0..3; anything else collapses to 1 so a corrupt plist cannot
     // park the consumers in an undefined branch.
     uint64_t normalized = (mode < 0 || mode >= 4) ? 1 : (uint64_t)(mode + 1);
-    BOOL ok = notify_set_state(token, normalized) == NOTIFY_STATUS_OK;
-    notify_cancel(token);
+    uint32_t setStatus = notify_set_state(token, normalized);
+    BOOL ok = setStatus == NOTIFY_STATUS_OK;
+    uint32_t cancelStatus = notify_cancel(token);
 
-    if (ok) notify_post(FG_NOTIFY_MODE);
+    uint32_t postStatus = 0;
+    if (ok) postStatus = notify_post(FG_NOTIFY_MODE);
     if (!ok) NSLog(@"FlatGlass: failed to publish mode.");
+    FGDRecordPublish((FGDPublish){mode >= 0 && mode <= 3 ? (int)mode : FGD_OTHER,
+                     (int)normalized, FGDStatus(registerStatus), FGDStatus(setStatus),
+                     FGDStatus(cancelStatus), ok ? FGDStatus(postStatus) : FGD_UNOBSERVED}, fromChange);
     return ok;
 }
 
@@ -219,15 +231,16 @@ static BOOL FGValidIdentifier(NSString *identifier) {
 #pragma mark - Modes
 
 static int FGWatchMode(void) {
+    FGDStartDaemon();
     // Publish once at startup so consumers have a state even before the user
     // touches the settings pane.
-    FGPublishMode(FGReadMode());
+    FGPublishMode(FGReadMode(), false);
 
     dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
     int token = 0;
     int status = notify_register_dispatch(FG_NOTIFY_SETTINGS, &token, queue, ^(int t) {
         NSInteger mode = FGReadMode();
-        FGPublishMode(mode);
+        FGPublishMode(mode, true);
         NSLog(@"[FlatGlass] mode published: %ld", (long)mode);
 
         // SnowBoard integrations regenerate their theme when it is present.
@@ -236,6 +249,7 @@ static int FGWatchMode(void) {
         }
     });
 
+    FGDRecordWatch(FGDStatus((uint32_t)status));
     if (status != NOTIFY_STATUS_OK) {
         NSLog(@"FlatGlass: cannot watch settings (%d)", status);
         return 1;

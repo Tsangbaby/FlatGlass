@@ -4,6 +4,7 @@ TWEAK_NAME = FlatGlassIconServices
 
 FlatGlassIconServices_FILES = \
     Tweak.x \
+    FGDiagAgent.m \
     FGTypes.m \
     FGCompat.m \
     FGCatalog.m \
