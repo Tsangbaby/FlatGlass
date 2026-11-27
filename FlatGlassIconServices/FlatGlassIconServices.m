@@ -79,7 +79,8 @@ static void InvalidateCache(BOOL force) {
     if (mode < 0) return;
 
     NSString *markerPath = [kICSCacheDir stringByAppendingPathComponent:kModeMarkerName];
-    NSString *content    = [NSString stringWithFormat:@"1:%ld", (long)mode];
+    // Generation 2 uses contour-based output; never reuse the test1 marker.
+    NSString *content    = [NSString stringWithFormat:@"2:%ld", (long)mode];
     NSString *existing   = [NSString stringWithContentsOfFile:markerPath
                                                      encoding:NSUTF8StringEncoding
                                                         error:NULL];
@@ -173,7 +174,7 @@ static id ComposedImage(id self, SEL _cmd, CGSize size, double scale) {
         if (side != CGImageGetHeight(cg) || side > FG_MAX_PIXELS) return original;
         const CGFloat srcScale = [original scale];
         if (!isnormal(srcScale) || srcScale <= 0) return original;
-        FGComposedStyle style = FGComposedStyleForMode(mode, mode == 1 && FGHasLayeredPrimaryResource(self));
+        FGComposedStyle style = FGComposedStyleForMode(mode, mode == 1 && FGHasLayeredPrimaryResource(first));
         CGImageRef out = style == FGRenderGlassed ? NGCreateGlassedImage(cg) : NGCreateRimmedImage(cg);
         return FGWrapImage(out, srcScale) ?: original;
     } @catch (__unused NSException *e) {

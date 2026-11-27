@@ -463,9 +463,9 @@ NGCatalogIndex *FGIndexFor(id catalog) {
 
 // 原 0x4cfc HasLayeredPrimaryResource
 //
-// 判据链：hook 已装 -> 取 resourceProvider -> resourceNamed:kISPrimaryResourceKey
+// 判据链：hook 已装 -> elements.firstObject 的 resourceProvider -> resourceNamed:kISPrimaryResourceKey
 //         -> 结果必须是 ISAssetCatalogResource -> 且它的 catalog 里有同名 iconstack。
-BOOL FGHasLayeredPrimaryResource(id self) {
+BOOL FGHasLayeredPrimaryResource(id firstElement) {
     static NSString *primaryKey;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -476,7 +476,7 @@ BOOL FGHasLayeredPrimaryResource(id self) {
     });
 
     id provider = nil;
-    @try { provider = [self valueForKey:@"resourceProvider"]; } @catch (__unused NSException *e) {}
+    @try { provider = [firstElement valueForKey:@"resourceProvider"]; } @catch (__unused NSException *e) {}
     SEL named = @selector(resourceNamed:);
     if (!FGOriginalResourceImage || !FGResourceClass ||
         !FGMethodIs(FGGetMethod(provider, named), 1, "@", "@", NULL)) return NO;

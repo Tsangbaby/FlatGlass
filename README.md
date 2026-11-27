@@ -1,6 +1,13 @@
-# FlatGlass 1.8.4 · RootHide 测试版 1
+# FlatGlass 1.8.4 · RootHide 测试版 2
 
-FlatGlass 是主屏图标高光插件。此工程由 `local.lumid.flatglass_1.8.4_iphoneos-arm64.deb` 还原，保留原包身份和署名；`1.8.4+roothide.test1` 是此工作树的测试版本，不是原作者的发布包。
+FlatGlass 是主屏图标高光插件。此工程由 `local.lumid.flatglass_1.8.4_iphoneos-arm64.deb` 还原，保留原包身份和署名；`1.8.4+roothide.test2` 是此工作树的测试版本，不是原作者的发布包。
+
+## test2 修复
+
+- `Edge Only` 的旧式合成分支现在沿图标轮廓叠加方向性内缘高光；描边和 `Edge and Artwork` 的高光共享一次到外部像素的精确距离计算，不再按到图标中心的距离上色。两个旧式合成入口保留源图 alpha。轮廓曲线的控制点按原包分组。
+- `Edge and Artwork` 判断有无分层主资源时查询 `elements.firstObject`，不误查合成器。未命中现有私有接口／输入不兼容时保持系统回退。
+- 缓存标记从 `1:<mode>` 升到 `2:<mode>`，避免在新版渲染器已加载时把 test1 的旧图误判为最新；不改偏好、不增加设备自动重启逻辑。
+- 完整的多层玻璃材质、离线 PNG 及 iOS 26 分层图标的模式行为不在此轮改动中。`Remove Highlights` 对普通非分层图标并非生效指标。
 
 ## 构建
 
@@ -10,7 +17,7 @@ FlatGlass 是主屏图标高光插件。此工程由 `local.lumid.flatglass_1.8.
 export THEOS=/path/to/roothide-theos
 gmake package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide \
   TARGET=iphone:clang:16.5:15.0 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
-python3 Scripts/validate_package.py packages/local.lumid.flatglass_1.8.4+roothide.test1_iphoneos-arm64e.deb
+python3 Scripts/validate_package.py packages/local.lumid.flatglass_1.8.4+roothide.test2_iphoneos-arm64e.deb
 ```
 
 `arm64` / `arm64e` 是 Mach-O 切片；`iphoneos-arm64e` 是 RootHide 的包架构。`15.0` 是最低编译部署目标，不是实际测试过的系统范围。也可显式选择 `THEOS_PACKAGE_SCHEME=rootless` 做传统 rootless 构建；请清理对象目录或用独立工作树，勿混用两方案的暂存目录或把两种包当作可互换。自动验证器针对本轮的 RootHide 候选。
@@ -26,4 +33,6 @@ python3 Scripts/validate_package.py packages/local.lumid.flatglass_1.8.4+roothid
 
 ## 验证
 
-`Tests/` 的脚本覆盖可移植的模式/尺寸逻辑和模拟的维护脚本调用，不访问真实 notifyd、SpringBoard 或 launchd。GitHub Actions 在云 Mac 构建、签名并检查包结构；**构建成功不代表真机可用**。真机还须确认设置能打开与保存、守护常驻、两个系统进程加载、支持的图标实际改变、Off 和卸载都能恢复。iOS 26 分层图标的 Mode 3 鉴于原版行为仍走扁平分支，不宣称 Edge Only 在该路径画出了边缘。
+`Tests/run-contour-tests.sh` 用真实生产 C 算子比较 120/180 px 的硬边、抗锯齿、透明及独立形状/覆盖输入。可选 `--against-test1` 对旧提交做同一对照，预期以像素断言失败结束。`Tests/run-contour-cg.sh` 在 macOS 的 CoreGraphics 上调用实际的 Rimmed/Glassed 函数，核对边缘变化、中心与透明度；`Tests/run-layer-probe.sh` 用受控本地对象验证生产分层判断。另保留 test1 的模式、尺寸和维护脚本模拟测试。CI 要求六组测试全部通过，再签名和验包。
+
+**构建和宿主图像测试通过不代表真机桌面一定走此路径。** iOS 15/16 建议比较同一中深色普通图标在 Off 和 Edge Only 之间的外缘差异。iOS 26 的分层资源 Mode 3 仍走原来的扁平分支。未在目标机上验证注入、缓存更新或所有 App 的图标。

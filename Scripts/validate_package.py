@@ -17,7 +17,7 @@ import zlib
 
 
 PACKAGE = "local.lumid.flatglass"
-VERSION = "1.8.4+roothide.test1"
+VERSION = "1.8.4+roothide.test2"
 ARCH = "iphoneos-arm64e"
 TWEAKS = "Library/MobileSubstrate/DynamicLibraries"
 BUNDLE = "Library/PreferenceBundles/FlatGlassPrefs.bundle"

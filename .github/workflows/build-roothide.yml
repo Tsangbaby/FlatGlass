@@ -2,7 +2,7 @@ name: Build FlatGlass RootHide package
 
 on:
   push:
-    branches: [build/roothide-test1]
+    branches: [fix/roothide-contour-test2]
 
 permissions:
   contents: read
@@ -100,17 +100,16 @@ jobs:
             printf '%s  %s\n' '9daceaff6cf94346594a12f9ef9c2ea23de15475b516f9e33c20871a018c098b' "$stub" | shasum -a 256 -c -
           } 2>&1 | tee "$LOG_DIR/inputs.log"
 
-      - name: Run host tests
+      - name: Run mode, contour pixel and native CoreGraphics tests
         run: |
           set -euo pipefail
           {
-            for test_script in Tests/run-daemon-tests.sh Tests/test-package-scripts.sh Tests/run-render-tests.sh; do
-              if [[ -f "$test_script" ]]; then
-                printf '== %s ==\n' "$test_script"
-                bash -e -o pipefail "$test_script"
-              else
-                printf 'Skipping absent test: %s\n' "$test_script"
-              fi
+            for test_script in Tests/run-daemon-tests.sh Tests/test-package-scripts.sh \
+              Tests/run-render-tests.sh Tests/run-contour-tests.sh \
+              Tests/run-contour-cg.sh Tests/run-layer-probe.sh; do
+              test -f "$test_script"
+              printf '== %s ==\n' "$test_script"
+              bash -e -o pipefail "$test_script"
             done
           } 2>&1 | tee "$LOG_DIR/tests.log"
 

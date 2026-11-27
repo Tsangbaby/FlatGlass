@@ -107,7 +107,7 @@ uint16_t        FGKeyValue(NGRendition *r, uint16_t key);
 NSString       *FGKeyListDesc(NSData *keyList);
 NSData         *FGRawData(NGRendition *r);
 CGColorRef      FGCreateColor(NGRendition *r);
-BOOL            FGHasLayeredPrimaryResource(id self);
+BOOL            FGHasLayeredPrimaryResource(id firstElement);
 BOOL            FGHasStack(id catalog, NSString *name);   // = findStack(indexFor(c), name, 0) != nil
 
 // 绘制（FGDraw.m）
@@ -127,10 +127,7 @@ CGColorSpaceRef FGSharedExtendedSRGB(void);
 float *FGIconShape(int n);                       // n*n 的 squircle 覆盖率（1.0 = 实心）
 void   FGGaussianBlur(float *plane, int n, float sigma);
 void   FGBoxPass(float *plane, float *row, int n, int r, int dir);
-void   FGEdt(const uint8_t *mask, int n, float *dist, int *nearCol, int *nearRow);
-void   FGDrawOutline(float *rgb, const float *coverage, const float *shape,
-                     int n, float style, float unused);
-void   FGDrawChicletHighlights(float *rgb, const float *coverage, int n);
+#include "FGContourPaint.h"
 
 CGImageRef NGCreateFlatIcon(id catalog, NSString *name, uint32_t appearance, size_t px);
 CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, size_t px);

@@ -2,7 +2,7 @@ include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = FlatGlassIconServices
 
-FlatGlassIconServices_FILES = $(wildcard *.m)
+FlatGlassIconServices_FILES = $(wildcard *.m) FGContourPaint.c
 FlatGlassIconServices_FRAMEWORKS = Foundation CoreGraphics CoreFoundation
 FlatGlassIconServices_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
 

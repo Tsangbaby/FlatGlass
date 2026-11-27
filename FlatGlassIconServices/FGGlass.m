@@ -12,13 +12,8 @@
 //  （法线/SDF 光照、半透明、镜面、投影）→ 最后统一叠 chiclet 高光与描边。
 //  逐指令还原稿见 reverse-reference/B_glass.c（含全部常量与分支）。
 //
-//  本文件是**可编译的 v1**：保留了原版的入口、模式开关（gGlassNoEdge）、
-//  形状遮罩与描边链路，玻璃合成的多通道细节尚未对齐。因此：
-//    · Mode 1（Edge and Artwork）当前 ≈ 原版的“只有边”效果
-//    · NGCreateRimmedImage / NGCreateGlassedImage 亦是如此
-//  要和 v1.8.4 逐像素一致，下一步是把 B_glass.c 的 IGDrawGroup 段编译化
-//  （接口已在 FGIconGlare.m 里留好：FGIconShape / FGEdt / FGDrawOutline /
-//   FGDrawChicletHighlights）。
+//  This test build restores per-contour outer highlights. The original full
+//  multi-pass artwork glass composition is not implemented here.
 //
 
 #import "FGInternal.h"
@@ -137,13 +132,9 @@ static CGImageRef FGCreateGlassIcon(id catalog, NSString *name, uint32_t appeara
 
     const int n = planes.n;
     float *shape = FGIconShape(n);
-    if (shape) {
-        if (!suppressChiclet) FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
-        // style <= 0.2 -> 白色描边；宽度由 n 自动推出（n/768 半宽）
-        FGDrawOutline(planes.rgb, planes.alpha, shape, n, /*style=*/0.1f, 0.0f);
-    }
-
-    CGImageRef out = FGStorePlanes(&planes, shape);
+    BOOL painted = shape && FGPaintContour(planes.rgb, planes.alpha, shape, n,
+                                            !suppressChiclet, true, 0.1f);
+    CGImageRef out = painted ? FGStorePlanes(&planes, shape) : NULL;
     free(shape);
     free(planes.rgb);
     free(planes.alpha);
@@ -158,40 +149,28 @@ CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, si
     return FGCreateGlassIcon(catalog, name, appearance, px, NO);
 }
 
-// [v1 近似] 只描边
-CGImageRef NGCreateRimmedImage(CGImageRef src) {
-    if (!src || CGImageGetWidth(src) < 8) return NULL;
+// Original rimmed applies the directional chiclet to the contour; it is not
+// the narrow white outline alone. Both composed paths preserve source alpha.
+static CGImageRef FGCompositeContour(CGImageRef src, bool artworkStyle) {
+    if (!src || CGImageGetWidth(src) < (artworkStyle ? 16u : 8u)) return NULL;
     FGPlanes planes = {0};
     if (!FGLoadPlanes(src, &planes)) return NULL;
-
-    const int n = planes.n;
-    float *shape = FGIconShape(n);
-    if (shape) {
-        FGDrawOutline(planes.rgb, planes.alpha, shape, n, 0.1f, 0.0f);
-    }
-    // 原版 Rimmed 不写 alpha：alpha 沿用源图，只替换 RGB
-    CGImageRef out = FGStorePlanes(&planes, NULL);
+    float *shape = FGIconShape(planes.n);
+    bool painted = shape && FGPaintContour(planes.rgb, planes.alpha, shape, planes.n,
+                                           true, artworkStyle, 0.1f);
+    CGImageRef out = painted ? FGStorePlanes(&planes, NULL) : NULL;
     free(shape);
     free(planes.rgb);
     free(planes.alpha);
     return out;
 }
 
-// [v1 近似] 通用玻璃化
-CGImageRef NGCreateGlassedImage(CGImageRef src) {
-    if (!src || CGImageGetWidth(src) < 16) return NULL;
-    FGPlanes planes = {0};
-    if (!FGLoadPlanes(src, &planes)) return NULL;
+CGImageRef NGCreateRimmedImage(CGImageRef src) {
+    return FGCompositeContour(src, false);
+}
 
-    const int n = planes.n;
-    float *shape = FGIconShape(n);
-    if (shape) {
-        FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
-        FGDrawOutline(planes.rgb, planes.alpha, shape, n, 0.1f, 0.0f);
-    }
-    CGImageRef out = FGStorePlanes(&planes, shape);
-    free(shape);
-    free(planes.rgb);
-    free(planes.alpha);
-    return out;
+// Per-artwork glass shading (IGDrawGroup) is still approximate; do not mask
+// the source alpha a second time or claim equivalence to the original.
+CGImageRef NGCreateGlassedImage(CGImageRef src) {
+    return FGCompositeContour(src, true);
 }
