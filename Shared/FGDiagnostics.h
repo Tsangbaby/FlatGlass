@@ -11,18 +11,40 @@ extern "C" {
 /* Diagnostic-only names. Do not subscribe to the production mode name here:
  * holding an extra token could mask the state-lifetime problem under test. */
 #ifndef FGD_PROGRESS
-#define FGD_PROGRESS "local.lumid.flatglass.diag.d1.agent-progress"
+#define FGD_PROGRESS "local.lumid.flatglass.diag.d2.agent-progress"
 #endif
 #ifndef FGD_TERMINAL
-#define FGD_TERMINAL "local.lumid.flatglass.diag.d1.cache-write-failed"
+#define FGD_TERMINAL "local.lumid.flatglass.diag.d2.cache-write-failed"
 #endif
 #ifndef FGD_REPORT_DIRECTORY
-#define FGD_REPORT_DIRECTORY "/var/mobile/Library/Preferences"
+#define FGD_REPORT_DIRECTORY "/var/mobile/Documents"
 #endif
-#define FGD_REPORT_NAME "FlatGlassDiagnostics-d1.plist"
+#define FGD_REPORT_NAME "FlatGlassDiagnostics-d2.plist"
+#ifndef FGD_PREFERENCES_DIRECTORY
+#define FGD_PREFERENCES_DIRECTORY "/var/mobile/Library/Preferences"
+#endif
+#define FGD_PREFERENCES_NAME "FlatGlassDiagnostics-d2-preferences.plist"
+#define FGD_INSTALL_MARKER_NAME "FlatGlassDiagnostics-d2-install.plist"
 #define FGD_REPORT_WRITE_LIMIT 64u
 #define FGD_UNOBSERVED (-1)
 #define FGD_OTHER (-2)
+
+enum {
+    FGD_WRITE_OK = 0,
+    FGD_WRITE_INVALID = 1,
+    FGD_WRITE_PARENT_OPEN = 2,
+    FGD_WRITE_PARENT_IDENTITY = 3,
+    FGD_WRITE_FILE_OPEN = 4,
+    FGD_WRITE_FILE_IDENTITY = 5,
+    FGD_WRITE_LOCK = 6,
+    FGD_WRITE_TRUNCATE = 7,
+    FGD_WRITE_CONTENT = 8,
+    FGD_WRITE_READBACK = 9,
+    FGD_WRITE_CLOSE = 10,
+};
+
+enum { FGD_PHASE_EARLY = 1, FGD_PHASE_COLLECTING = 2 };
+enum { FGD_INSTALL_ENTERED = 1, FGD_INSTALL_COMPLETE = 2 };
 
 enum {
     FGD_ENTERED              = 1u << 0,
@@ -82,6 +104,9 @@ typedef struct {
 typedef struct {
     uint32_t generation;
     unsigned sequence;
+    int phase;
+    int documentsWriteStatus;
+    int preferencesWriteStatus;
     int watchStatus;
     FGDPublish initial;
     FGDPublish change;
@@ -101,9 +126,10 @@ void FGDAgentStart(void);
 void FGDAgentRecord(uint32_t flags);
 void FGDAgentTerminalWriteFailure(uint64_t state, bool fromNotification);
 
-/* Only flatglass owns file I/O. The parameter lets the host test the exact
- * writer in an isolated directory. The runtime passes FGD_REPORT_DIRECTORY. */
-bool FGDWriteReport(const char *directory, const FGDReport *report);
+/* Only flatglass/flatglassdiag own file I/O. The two report names are closed;
+ * a host fixture can supply isolated directories without changing writes. */
+int FGDWriteReport(const char *directory, const char *name, const FGDReport *report);
+int FGDWriteInstallMarker(const char *directory, int phase, int bootstrap, int fallback);
 
 #ifdef __cplusplus
 }

@@ -12,4 +12,11 @@ ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 flatglass_LIBRARIES += roothide
 endif
 
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+TOOL_NAME += flatglassdiag
+flatglassdiag_FILES = FGDiagInstall.c FGDiagReport.c
+flatglassdiag_CFLAGS = -I../Shared
+flatglassdiag_INSTALL_PATH = /usr/libexec
+endif
+
 include $(THEOS_MAKE_PATH)/tool.mk

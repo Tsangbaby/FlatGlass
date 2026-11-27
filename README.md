@@ -1,6 +1,6 @@
 # FlatGlass 1.8.4 — reconstructed source tree
 
-Package `local.lumid.flatglass` 1.8.4+diag.1, a diagnostic of the 1.8.4 build.
+Package `local.lumid.flatglass` 1.8.4+diag.2, a diagnostic of the 1.8.4 build.
 This is a repaired reconstruction from
 the release binaries, not the author's original source or an installable
 package. It retains the four components and their notify chain.
@@ -53,14 +53,31 @@ Mode values are **not** in display order — this trips people up:
 | Off | 2 | 3 |
 | Edge Only | 3 | 4 |
 
-### RootHide diagnostic D1
+### RootHide diagnostic D2
 
-The diagnostic is not a rendering repair. It leaves the install jobs, render
-hook checks, regular notify lifetime, refresh route and cache actions intact.
-Two separate local diagnostic channels let the existing daemon collect agent
-results without adding a subscriber to the production mode name. No report is
-uploaded. The only new device file is the mode-0600 report
-`/var/mobile/Library/Preferences/FlatGlassDiagnostics-d1.plist`.
+D2 does not repair rendering. It retains the existing launchctl command and
+fallback order, renderer hooks, production notify lifetime, refresh route and
+cache actions. D2 uses its own diagnostic channels and file names, does not
+touch a D1 report, and uploads no data.
+
+- `/var/mobile/Documents/FlatGlassDiagnostics-d2-install.plist` is written
+  independently of the watcher by a short-lived installer probe that drops to
+  `mobile` before touching either directory. It falls back to the same basename
+  under `/var/mobile/Library/Preferences/` if Documents cannot be written.
+  `install_phase` 1 means the pre-launchctl probe ran, and 2 means launchctl
+  returned. `bootstrap_status`/`fallback_status` are command exit statuses,
+  with `-1` for not attempted. A successful launchctl call is not daemon proof.
+- The watcher tries `/var/mobile/Documents/FlatGlassDiagnostics-d2.plist` and
+  `/var/mobile/Library/Preferences/FlatGlassDiagnostics-d2-preferences.plist`
+  independently before registering the diagnostic agent channels. `phase` 1
+  is the early snapshot, and 2 means diagnostic subscriptions were attempted.
+  `documents_write_status` and `preferences_write_status` describe the **first**
+  attempts: `-1` unobserved, `0` saved and read back, `1` invalid arguments,
+  `2` directory open, `3` directory identity, `4` file open, `5` file identity,
+  `6` lock, `7` truncate, `8` write/sync, `9` readback, `10` close. They are
+  not receipts for later snapshots. The sequence is capped at 64 snapshots per
+  daemon start. Files are private (0600); no directories are created. A read
+  concurrent with a rewrite can be incomplete.
 
 - `initial` and `change` retain the startup and last settings-change publish
   attempts, including register/set/cancel/post return codes. `0` status is
@@ -78,9 +95,13 @@ uploaded. The only new device file is the mode-0600 report
   the sender's delivery. The writer replaces a bounded snapshot, not an event
   history. Across agent restarts bits may describe different invocations.
 
-For a single reproduction, use a fresh report with a settings-change sample.
-An absent/invalid report, or missing agent events with no positive agent signal,
-cannot distinguish a missed diagnostic event from a did-not-load outcome.
+For a single reproduction, install D2, switch between the two Edge modes once,
+return to the Home Screen and export whichever of the above files appear in
+Filza. No cache clear, terminal command or respring is required for this test.
+Check file freshness after a repeated D2 install; a prior diagnostic file may
+still exist when the present write fails. Missing reports are not proof a process
+did not run. A process can exit before the asynchronous watcher report is written,
+and missing agent events alone cannot distinguish no delivery from no load.
 
 ---
 
@@ -180,8 +201,8 @@ claim of pixel-identical output.
 
 ## Debugging on device
 
-Nothing logs by default; every diagnostic call site is behind a NULL block
-pointer, exactly like the original.
+The legacy debug logging below is separate from the D2 export. It is not needed
+for the D2 device test.
 
 ```sh
 # enable logging in the icon agent

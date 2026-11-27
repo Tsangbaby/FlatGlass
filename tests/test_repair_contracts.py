@@ -316,6 +316,9 @@ class FlatGlassRepairContracts(unittest.TestCase):
             # Pipe a separate descriptor around the scripts' stdout redirection;
             # make bootout fail so the legacy unload branch is also exercised.
             mock = 'exec 3>&1\nlaunchctl() { printf "%s\\n" "$*" >&3; [ "$1" != bootout ]; }\n'
+            if rel.endswith("postinst"):
+                body = body.replace('/usr/libexec/flatglassdiag', 'fgd_test_install_probe')
+                mock += 'fgd_test_install_probe() { return 0; }\n'
             cmd = ["/bin/sh", "-c", mock + body, rel, "upgrade"]
             for arch, prefix in (("iphoneos-arm", ""), ("iphoneos-arm64", "/var/jb"),
                                  ("iphoneos-arm64e", ""), ("unknown", None)):

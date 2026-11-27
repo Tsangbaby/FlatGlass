@@ -9,8 +9,32 @@ esac
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 if [ -n "$prefix" ]; then PATH="$prefix/usr/bin:$prefix/bin:$PATH"; fi
 export PATH
+
+fgd_install_sample() {
+  [ "$DPKG_MAINTSCRIPT_ARCH" = iphoneos-arm64e ] || return 0
+  /usr/libexec/flatglassdiag "$@" >/dev/null 2>&1 ||
+    printf '%s\n' 'FlatGlass diagnostic install marker unavailable' >&2
+}
+
+fgd_install_sample 1 -1 -1 || true
+
 job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
 launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
   launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||
   launchctl unload "$job" >/dev/null 2>&1 || true
-launchctl bootstrap system "$job" || launchctl load "$job"
+if launchctl bootstrap system "$job"; then
+  bootstrap_status=0
+  fallback_status=-1
+  launch_status=0
+else
+  bootstrap_status=$?
+  if launchctl load "$job"; then
+    fallback_status=0
+    launch_status=0
+  else
+    fallback_status=$?
+    launch_status=$fallback_status
+  fi
+fi
+fgd_install_sample 2 "$bootstrap_status" "$fallback_status" || true
+exit "$launch_status"

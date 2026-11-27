@@ -9,12 +9,45 @@
 static pthread_mutex_t reportLock = PTHREAD_MUTEX_INITIALIZER;
 static dispatch_source_t reportSource;
 static FGDReport report = {
+    .phase = FGD_PHASE_EARLY,
+    .documentsWriteStatus = FGD_UNOBSERVED,
+    .preferencesWriteStatus = FGD_UNOBSERVED,
     .watchStatus = FGD_UNOBSERVED,
     .initial = FGD_EMPTY,
     .change = FGD_EMPTY,
     .agentChannel = FGD_UNOBSERVED,
     .terminalChannel = FGD_UNOBSERVED,
 };
+
+/* Called only on the diagnostic queue. No report I/O under reportLock, and
+ * neither destination's failure prevents attempting the other. */
+static void writeSnapshot(void) {
+    pthread_mutex_lock(&reportLock);
+    if (report.sequence >= FGD_REPORT_WRITE_LIMIT) {
+        pthread_mutex_unlock(&reportLock);
+        return;
+    }
+    FGDReport snapshot = report;
+    snapshot.sequence = ++report.sequence;
+    pthread_mutex_unlock(&reportLock);
+
+    const int documents = FGDWriteReport(FGD_REPORT_DIRECTORY, FGD_REPORT_NAME, &snapshot);
+    const int preferences = FGDWriteReport(FGD_PREFERENCES_DIRECTORY, FGD_PREFERENCES_NAME, &snapshot);
+    if (snapshot.sequence != 1) return;
+
+    /* Retain the first attempt for each destination. Re-publish it once, not
+     * recursively: these fields describe the first pass, not this rewrite. */
+    pthread_mutex_lock(&reportLock);
+    report.documentsWriteStatus = snapshot.documentsWriteStatus = documents;
+    report.preferencesWriteStatus = snapshot.preferencesWriteStatus = preferences;
+    pthread_mutex_unlock(&reportLock);
+    if (documents == FGD_WRITE_OK)
+        (void)FGDWriteReport(FGD_REPORT_DIRECTORY, FGD_REPORT_NAME, &snapshot);
+    if (preferences == FGD_WRITE_OK)
+        (void)FGDWriteReport(FGD_PREFERENCES_DIRECTORY, FGD_PREFERENCES_NAME, &snapshot);
+    if (documents != FGD_WRITE_OK && preferences != FGD_WRITE_OK)
+        syslog(LOG_NOTICE, "FlatGlass diagnostic: both initial report writes unavailable (%d, %d)", documents, preferences);
+}
 
 static void queueReport(void) {
     dispatch_source_t source = reportSource;
@@ -46,22 +79,11 @@ void FGDStartDaemon(void) {
         if (!source) return;
         uint32_t generation = arc4random();
         report.generation = generation ? generation : 1;
-        dispatch_source_set_event_handler(source, ^{
-            pthread_mutex_lock(&reportLock);
-            if (report.sequence >= FGD_REPORT_WRITE_LIMIT) {
-                pthread_mutex_unlock(&reportLock);
-                return;
-            }
-            FGDReport snapshot = report;
-            snapshot.sequence = ++report.sequence;
-            pthread_mutex_unlock(&reportLock);
-            if (!FGDWriteReport(FGD_REPORT_DIRECTORY, &snapshot) && snapshot.sequence == 1) {
-                syslog(LOG_NOTICE, "FlatGlass diagnostic: report write unavailable");
-            }
-        });
+        dispatch_source_set_event_handler(source, ^{ writeSnapshot(); });
         reportSource = source;
         dispatch_resume(source);
         dispatch_async(queue, ^{
+            writeSnapshot();
             int progress = 0, terminal = 0;
             uint32_t terminalStatus = notify_register_dispatch(FGD_TERMINAL, &terminal, queue, ^(int token) {
                 readAgent(token, true);
@@ -70,6 +92,7 @@ void FGDStartDaemon(void) {
                 readAgent(token, false);
             });
             pthread_mutex_lock(&reportLock);
+            report.phase = FGD_PHASE_COLLECTING;
             report.agentChannel = FGDStatus(progressStatus);
             report.terminalChannel = FGDStatus(terminalStatus);
             pthread_mutex_unlock(&reportLock);
