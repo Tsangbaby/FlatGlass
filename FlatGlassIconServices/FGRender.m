@@ -191,7 +191,6 @@ static void FGSynthesizeSecondStop(CGColorRef color, CGColorRef *outColor, doubl
 
     CGFloat nr = FGAdjustChannel(r, luminance, k);
     CGFloat ng = FGAdjustChannel(g, luminance, k);
-    CGFloat nb = FGAdjustChannel(b, luminance, k);
 
     // Blue gets one extra contrast pass before the blend below.
     double base = b - 0.2 * (luminance - b);
@@ -518,7 +517,7 @@ BOOL FGDrawElement(CGContextRef ctx, FGDrawState *state, id resource,
                 CGDataProviderRef provider = CGDataProviderCreateWithCFData(raw);
                 CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
                 if (provider && gray) {
-                    mask = CGImageCreate(w, h, 8, 8, bpr, gray, kCGImageAlphaNone,
+                    mask = CGImageCreate(w, h, 8, 8, bpr, gray, (CGBitmapInfo)kCGImageAlphaNone,
                                          provider, NULL, false, kCGRenderingIntentDefault);
                 }
                 if (gray) CGColorSpaceRelease(gray);
