@@ -11,10 +11,11 @@
 //      "Off"               -> 2
 //      "Edge Only"         -> 3
 //
-//  Writing a value has to do three things, in this order:
-//    1. persist it in the domain the daemon reads
-//    2. post settings-changed so the daemon republishes the notify state
-//    3. nothing else — the daemon owns the state, we never set it directly
+// RootHide reads the package-private mode record; the legacy CFPreferences
+// domain is consulted only by Settings for one-way migration. In other
+// package schemes the original preferences domain remains authoritative.
+// Post the wake-up only after a successful commit. The daemon alone publishes
+// the renderer state.
 //
 
 #import <Foundation/Foundation.h>
@@ -24,6 +25,46 @@
 #import <notify.h>
 
 #import "FGCommon.h"
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+#import <roothide.h>
+#import "FGModeStore.h"
+#include <errno.h>
+#endif
+
+static BOOL FGReadLegacySelection(NSInteger *mode) {
+    CFStringRef domain = (__bridge CFStringRef)FG_PREFS_DOMAIN;
+    if (!CFPreferencesAppSynchronize(domain)) return NO;
+    id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Mode"), domain));
+    return FGDecodePreferenceMode(value, mode);
+}
+
+static BOOL FGDecodePickerSelection(id value, NSInteger *mode) {
+    if (FGDecodePreferenceMode(value, mode)) return YES;
+    if (![value isKindOfClass:[NSString class]] || [(NSString *)value length] != 1) return NO;
+    const unichar digit = [(NSString *)value characterAtIndex:0];
+    if (digit < '0' || digit > '3') return NO;
+    *mode = digit - '0';
+    return YES;
+}
+
+static BOOL FGNotifySettingsChanged(void) {
+    uint32_t status = notify_post(FG_NOTIFY_SETTINGS);
+    if (status != NOTIFY_STATUS_OK) NSLog(@"FlatGlass: settings notification failed (%u)", status);
+    return status == NOTIFY_STATUS_OK;
+}
+
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+static void FGMigrateLegacySelection(void) {
+    const char *directory = jbroot(FG_MODE_DIRECTORY);
+    int stored = -1;
+    if (FGModeStoreRead(directory, &stored) != ENOENT) return;
+    NSInteger legacy = 0;
+    if (!FGReadLegacySelection(&legacy)) return;
+    const int status = FGModeStoreWrite(directory, (int)legacy);
+    if (status == 0) (void)FGNotifySettingsChanged();
+    else NSLog(@"FlatGlass: preference migration failed (%d)", status);
+}
+#endif
 
 @interface FGSettingsListController : PSListController
 @end
@@ -38,45 +79,43 @@
 }
 
 - (id)readMode:(PSSpecifier *)specifier {
-    CFPreferencesAppSynchronize((__bridge CFStringRef)FG_PREFS_DOMAIN);
-    CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("Mode"),
-                                                        (__bridge CFStringRef)FG_PREFS_DOMAIN);
-    NSInteger mode = 0;
-    if (value) {
-        if (CFGetTypeID(value) == CFNumberGetTypeID()) {
-            CFNumberGetValue((CFNumberRef)value, kCFNumberNSIntegerType, &mode);
-        }
-        CFRelease(value);
-    }
-    if (mode < 0 || mode > 3) mode = 0;
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+    int mode = -1;
+    if (FGModeStoreRead(jbroot(FG_MODE_DIRECTORY), &mode) == 0) return @(mode);
+    return @(FGModeOff);
+#else
+    NSInteger mode = FGModeFlat;
+    return FGReadLegacySelection(&mode) ? @(mode) : @(FGModeFlat);
+#endif
+}
 
-    // PSSpecifier consumers expect an NSNumber or a string; number is fine for
-    // a PSLinkListCell with numeric validValues.
-    return @(mode);
+- (void)showModeError:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"FlatGlass"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)writeMode:(id)value specifier:(PSSpecifier *)specifier {
-    NSInteger mode = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : 0;
-    if (mode < 0 || mode > 3) mode = 0;
-
-    CFPreferencesSetAppValue(CFSTR("Mode"), (__bridge CFNumberRef)@(mode),
-                             (__bridge CFStringRef)FG_PREFS_DOMAIN);
-    BOOL saved = CFPreferencesAppSynchronize((__bridge CFStringRef)FG_PREFS_DOMAIN);
-
-    if (!saved) {
-        UIAlertController *alert =
-            [UIAlertController alertControllerWithTitle:@"FlatGlass"
-                                                message:@"Could not save the selected mode."
-                                         preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+    NSInteger mode = 0;
+    if (!FGDecodePickerSelection(value, &mode)) return;
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+    const int status = FGModeStoreWrite(jbroot(FG_MODE_DIRECTORY), (int)mode);
+    if (status != 0) {
+        [self showModeError:[NSString stringWithFormat:@"Could not save the selected mode (error %d).", status]];
         return;
     }
-
-    // The daemon listens for this and is the only publisher of the render mode.
-    notify_post(FG_NOTIFY_SETTINGS);
+#else
+    CFPreferencesSetAppValue(CFSTR("Mode"), (__bridge CFNumberRef)@(mode),
+                             (__bridge CFStringRef)FG_PREFS_DOMAIN);
+    if (!CFPreferencesAppSynchronize((__bridge CFStringRef)FG_PREFS_DOMAIN)) {
+        [self showModeError:@"Could not save the selected mode."];
+        return;
+    }
+#endif
+    if (!FGNotifySettingsChanged())
+        [self showModeError:@"The mode is saved, but FlatGlass could not send the update notification."];
 }
 
 - (void)viewDidLoad {
@@ -90,7 +129,9 @@
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // Re-read in case the value changed while the pane was backgrounded.
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+    FGMigrateLegacySelection();
+#endif
     [self reloadSpecifiers];
 }
 

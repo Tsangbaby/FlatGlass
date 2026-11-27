@@ -14,7 +14,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 // ---------------------------------------------------------------------------
-// Preferences (read by every component, written by the settings pane)
+// Preferences (the Settings pane owns persisted user choices)
 // ---------------------------------------------------------------------------
 
 #define FG_PREFS_DOMAIN   @"local.lumid.flatglass"
@@ -29,10 +29,21 @@ typedef NS_ENUM(NSInteger, FGMode) {
     FGModeEdge          = 3,   // Edge Only — soft highlight around the rim
 };
 
+static inline BOOL FGDecodePreferenceMode(id value, NSInteger *mode) {
+    if (!mode || ![value isKindOfClass:[NSNumber class]]) return NO;
+    CFNumberRef number = (__bridge CFNumberRef)value;
+    NSInteger decoded = 0;
+    if (CFGetTypeID(number) != CFNumberGetTypeID() || CFNumberIsFloatType(number) ||
+        !CFNumberGetValue(number, kCFNumberNSIntegerType, &decoded) || decoded < 0 || decoded > 3)
+        return NO;
+    *mode = decoded;
+    return YES;
+}
+
 // ---------------------------------------------------------------------------
 // Darwin notify chain
 //
-//   settings pane  --(CFPreferences write + notify_post)-->  daemon
+//   settings pane  --(persist mode + notify_post)-------->  daemon
 //   daemon          --(notify_set_state)------------------->  iconservicesagent
 //                                                             SpringBoard
 //

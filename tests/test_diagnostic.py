@@ -11,7 +11,7 @@ import unittest
 from xml.parsers.expat import ExpatError
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = 'e815a7385b08c13fe0b4456c5baa16202af241fc'
+BASE = 'f4a18ee0cd145880013e64f7e60a29a921ec4b85'  # Only the D2 candidate's base.
 REPORT = 'FlatGlassDiagnostics-d2.plist'
 PREFS = 'FlatGlassDiagnostics-d2-preferences.plist'
 INSTALL = 'FlatGlassDiagnostics-d2-install.plist'
@@ -140,23 +140,25 @@ class FlatGlassDiagnostic(unittest.TestCase):
             self.assertEqual(subprocess.run([*args, INSTALL, '1', '-1', '-1'], timeout=3).returncode, 4)
             self.assertEqual(d1.read_bytes(), b'D1 evidence')
 
-    def test_diagnostics_do_not_replace_rendering_preferences_or_launch_paths(self):
+    def test_candidate_leaves_d2_rendering_filters_and_launch_job_intact(self):
         protected = ('FlatGlassIconServices/FGRender.m', 'FlatGlassIconServices/FGWrap.m',
-                     'FlatGlassRefresh/Tweak.x', 'FlatGlassPrefs/FGSettingsListController.m',
-                     'FlatGlassPrefs/Resources/Root.plist', 'Shared/FGCommon.h',
+                     'FlatGlassIconServices/Tweak.x', 'FlatGlassIconServices/FGCompat.m',
+                     'FlatGlassIconServices/FGDiagAgent.m',
+                     'FlatGlassPrefs/Resources/Root.plist',
                      'FlatGlassIconServices/FlatGlassIconServices.plist',
+                     'FlatGlassRefresh/FlatGlassRefresh.plist',
                      'templates/local.lumid.flatglass.plist.in',
                      'layout/DEBIAN/prerm', 'Makefile')
         for path in protected:
             with self.subTest(path=path):
                 self.assertEqual((ROOT / path).read_bytes(), base_bytes(path))
-        baseline = base_bytes('flatglass/main.m').decode()
-        live = read('flatglass/main.m')
-        self.assertEqual(live.count('notify_register_check(FG_NOTIFY_MODE, &token)'),
-                         baseline.count('notify_register_check(FG_NOTIFY_MODE, &token)'))
-        self.assertIn('if (ok) postStatus = notify_post(FG_NOTIFY_MODE);', live)
-        ordered = ['notify_set_state(token, normalized)', 'notify_cancel(token)', 'notify_post(FG_NOTIFY_MODE)']
-        self.assertEqual([live.index(s) for s in ordered], sorted(live.index(s) for s in ordered))
+        refresh = base_bytes('FlatGlassRefresh/Tweak.x').decode()
+        refresh = refresh.replace('The agent publishes this once it has re-rendered; the delay below gives\n'
+                                  '    // it room to finish writing the cache before we force a reload.',
+                                  'The daemon publishes the mode. Allow the agent time to handle the\n'
+                                  '    // cache before asking SpringBoard to reload; never write back stale state.')
+        refresh = refresh.replace('            notify_set_state(RefreshStatusToken, state);\n', '')
+        self.assertEqual(read('FlatGlassRefresh/Tweak.x'), refresh)
         daemon_transport = read('flatglass/FGDiagDaemon.m')
         agent_transport = read('FlatGlassIconServices/FGDiagAgent.m')
         for text in (daemon_transport, agent_transport, read('Shared/FGDiagnostics.h')):
@@ -278,7 +280,7 @@ launchctl() {
 }
 '''
         body = postinst.replace('/usr/libexec/flatglassdiag', 'install_probe')
-        baseline = base_bytes('layout/DEBIAN/postinst').decode()
+        baseline = base_bytes('layout/DEBIAN/postinst').decode().replace('/usr/libexec/flatglassdiag', 'install_probe')
         for arch, probe, boot, load in (('iphoneos-arm64e', 0, 0, 31), ('iphoneos-arm64e', 5, 0, 31),
                                         ('iphoneos-arm64e', 5, 9, 0), ('iphoneos-arm64e', 5, 9, 31),
                                         ('iphoneos-arm64', 5, 9, 31), ('iphoneos-arm', 5, 0, 31)):
@@ -288,7 +290,7 @@ launchctl() {
                 new = subprocess.run(['/bin/sh', '-c', mock + body], env=env, capture_output=True, text=True, timeout=5)
                 expected = old.stdout.splitlines()
                 if arch == 'iphoneos-arm64e':
-                    expected = ['probe 1 -1 -1', *expected, f'probe 2 {boot} {load if boot else -1}']
+                    expected = [expected[0], 'probe --prepare-mode-store', *expected[1:]]
                 self.assertEqual(new.stdout.splitlines(), expected)
                 self.assertEqual(new.returncode, old.returncode)
 
@@ -296,12 +298,12 @@ launchctl() {
         control = read('control')
         self.assertTrue(control.startswith('Package: local.lumid.flatglass\n'))
         version = next(s.split(': ', 1)[1] for s in control.splitlines() if s.startswith('Version: '))
-        self.assertEqual(version, '1.8.4+diag.2')
+        self.assertEqual(version, '1.8.4+diag.2.modefix.1')
         workflow = read('.github/workflows/build-flatglass-roothide.yml')
-        self.assertIn('branches: [build/flatglass-1.8.4-roothide-diag2]', workflow)
-        self.assertIn('Tsangbaby/FlatGlass:push:refs/heads/build/flatglass-1.8.4-roothide-diag2)', workflow)
+        self.assertIn('branches: [build/flatglass-1.8.4-roothide-d2-modefix1]', workflow)
+        self.assertIn('Tsangbaby/FlatGlass:push:refs/heads/build/flatglass-1.8.4-roothide-d2-modefix1)', workflow)
+        self.assertIn(BASE, workflow)
         self.assertIn('THEOS_PACKAGE_SCHEME=roothide', workflow)
-        self.assertNotIn('build/flatglass-1.8.4-repaired-roothide', workflow)
 
 
 if __name__ == '__main__':

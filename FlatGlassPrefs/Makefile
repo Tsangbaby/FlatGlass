@@ -10,4 +10,9 @@ FlatGlassPrefs_PRIVATE_FRAMEWORKS = Preferences
 FlatGlassPrefs_CFLAGS = -fobjc-arc -I../Shared -I.
 FlatGlassPrefs_LDFLAGS = -undefined dynamic_lookup
 
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+FlatGlassPrefs_FILES += ../Shared/FGModeStore.c
+FlatGlassPrefs_LIBRARIES += roothide
+endif
+
 include $(THEOS_MAKE_PATH)/bundle.mk

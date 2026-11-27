@@ -157,8 +157,8 @@ static void StartFlatGlassRefresh(void) {
 
     dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
 
-    // The agent publishes this once it has re-rendered; the delay below gives
-    // it room to finish writing the cache before we force a reload.
+    // The daemon publishes the mode. Allow the agent time to handle the
+    // cache before asking SpringBoard to reload; never write back stale state.
     notify_register_dispatch(FG_NOTIFY_MODE, &RefreshStatusToken, queue, ^(int token) {
         uint64_t state = 0;
         if (notify_get_state(token, &state) != NOTIFY_STATUS_OK) return;
@@ -167,7 +167,6 @@ static void StartFlatGlassRefresh(void) {
                                      (int64_t)(kFGRefreshDelay * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             RefreshVisibleIconViews();
-            notify_set_state(RefreshStatusToken, state);
             notify_post("local.lumid.flatglass.refreshed-views");
         });
     });

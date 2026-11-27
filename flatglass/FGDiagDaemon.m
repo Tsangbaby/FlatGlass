@@ -4,6 +4,10 @@
 #import <pthread.h>
 #import <stdlib.h>
 #import <syslog.h>
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+#import <roothide.h>
+#import "FGModeStore.h"
+#endif
 
 #define FGD_EMPTY { FGD_UNOBSERVED, FGD_UNOBSERVED, FGD_UNOBSERVED, FGD_UNOBSERVED, FGD_UNOBSERVED, FGD_UNOBSERVED }
 static pthread_mutex_t reportLock = PTHREAD_MUTEX_INITIALIZER;
@@ -33,20 +37,30 @@ static void writeSnapshot(void) {
 
     const int documents = FGDWriteReport(FGD_REPORT_DIRECTORY, FGD_REPORT_NAME, &snapshot);
     const int preferences = FGDWriteReport(FGD_PREFERENCES_DIRECTORY, FGD_PREFERENCES_NAME, &snapshot);
-    if (snapshot.sequence != 1) return;
-
-    /* Retain the first attempt for each destination. Re-publish it once, not
-     * recursively: these fields describe the first pass, not this rewrite. */
-    pthread_mutex_lock(&reportLock);
-    report.documentsWriteStatus = snapshot.documentsWriteStatus = documents;
-    report.preferencesWriteStatus = snapshot.preferencesWriteStatus = preferences;
-    pthread_mutex_unlock(&reportLock);
-    if (documents == FGD_WRITE_OK)
-        (void)FGDWriteReport(FGD_REPORT_DIRECTORY, FGD_REPORT_NAME, &snapshot);
-    if (preferences == FGD_WRITE_OK)
-        (void)FGDWriteReport(FGD_PREFERENCES_DIRECTORY, FGD_PREFERENCES_NAME, &snapshot);
-    if (documents != FGD_WRITE_OK && preferences != FGD_WRITE_OK)
-        syslog(LOG_NOTICE, "FlatGlass diagnostic: both initial report writes unavailable (%d, %d)", documents, preferences);
+    if (snapshot.sequence == 1) {
+        /* Retain the first attempt for each destination. Re-publish it once,
+         * not recursively; these fields describe the first pass. */
+        pthread_mutex_lock(&reportLock);
+        report.documentsWriteStatus = snapshot.documentsWriteStatus = documents;
+        report.preferencesWriteStatus = snapshot.preferencesWriteStatus = preferences;
+        pthread_mutex_unlock(&reportLock);
+        if (documents == FGD_WRITE_OK)
+            (void)FGDWriteReport(FGD_REPORT_DIRECTORY, FGD_REPORT_NAME, &snapshot);
+        if (preferences == FGD_WRITE_OK)
+            (void)FGDWriteReport(FGD_PREFERENCES_DIRECTORY, FGD_PREFERENCES_NAME, &snapshot);
+    }
+    if (documents != FGD_WRITE_OK && preferences != FGD_WRITE_OK) {
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+        const int privateStatus = FGDWriteReport(jbroot(FG_MODE_DIRECTORY), FGD_REPORT_NAME, &snapshot);
+        if (snapshot.sequence == 1 && privateStatus != FGD_WRITE_OK)
+            syslog(LOG_NOTICE, "FlatGlass diagnostic: report destinations unavailable (%d, %d, %d)",
+                   documents, preferences, privateStatus);
+#else
+        if (snapshot.sequence == 1)
+            syslog(LOG_NOTICE, "FlatGlass diagnostic: both initial report writes unavailable (%d, %d)",
+                   documents, preferences);
+#endif
+    }
 }
 
 static void queueReport(void) {

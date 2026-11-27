@@ -33,6 +33,8 @@
 #import "FGCommon.h"
 #import "FGLog.h"
 #import "FGDiagnostics.h"
+#import "FGModeStore.h"
+#include <errno.h>
 
 #ifndef FG_INSTALL_PREFIX
 #define FG_INSTALL_PREFIX @""
@@ -143,41 +145,60 @@ static NSString *FGInstallPath(NSString *path) {
 
 #pragma mark - Helpers
 
-static NSString *FGPreferencePath(void) {
-    // The daemon runs as `mobile`, so the plain /var/mobile path resolves.
-    return @"/var/mobile/Library/Preferences/local.lumid.flatglass.plist";
+static int FGReadMode(int *mode) {
+#if defined(THEOS_PACKAGE_SCHEME_ROOTHIDE)
+    return FGModeStoreRead(jbroot(FG_MODE_DIRECTORY), mode);
+#else
+    NSData *data = [NSData dataWithContentsOfFile:FG_PREFS_PATH options:0 error:NULL];
+    if (!data) return EIO;
+    id plist = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL];
+    if (![plist isKindOfClass:[NSDictionary class]]) return EINVAL;
+    NSInteger value = 0;
+    if (!FGDecodePreferenceMode(plist[@"Mode"], &value)) return EINVAL;
+    *mode = (int)value;
+    return 0;
+#endif
 }
 
-static NSInteger FGReadMode(void) {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:FGPreferencePath()];
-    id value = prefs[@"Mode"];
-    return [value isKindOfClass:[NSNumber class]] ? [value integerValue] : 0;
-}
-
-static BOOL FGPublishMode(NSInteger mode, bool fromChange) {
-    int token = 0;
-    uint32_t registerStatus = notify_register_check(FG_NOTIFY_MODE, &token);
-    if (registerStatus != NOTIFY_STATUS_OK) {
-        FGDRecordPublish((FGDPublish){mode >= 0 && mode <= 3 ? (int)mode : FGD_OTHER,
-                         FGD_UNOBSERVED, FGDStatus(registerStatus), FGD_UNOBSERVED,
-                         FGD_UNOBSERVED, FGD_UNOBSERVED}, fromChange);
+static BOOL FGPublishSavedMode(int *modeToken, bool fromChange) {
+    int mode = -1;
+    const int readStatus = FGReadMode(&mode);
+    int state = FGStateForModeRead(readStatus, mode, !fromChange);
+    FGDPublish sample = {.mode = readStatus == 0 ? mode : FGD_UNOBSERVED, .state = state,
+                         .registered = FGD_UNOBSERVED, .set = FGD_UNOBSERVED,
+                         .cancel = FGD_UNOBSERVED, .post = FGD_UNOBSERVED};
+    if (readStatus != 0) {
+        NSLog(@"FlatGlass: mode read unavailable (%d); %@", readStatus,
+              fromChange ? @"keeping the published state" : @"using system rendering until a saved mode is available");
+    }
+    if (state == FG_MODE_KEEP_STATE) {
+        FGDRecordPublish(sample, fromChange);
         return NO;
     }
+    if (*modeToken < 0) {
+        int token;
+        uint32_t status = notify_register_check(FG_NOTIFY_MODE, &token);
+        sample.registered = FGDStatus(status);
+        if (status != NOTIFY_STATUS_OK) {
+            FGDRecordPublish(sample, fromChange);
+            NSLog(@"FlatGlass: cannot register the mode publisher (%u)", status);
+            return NO;
+        }
+        *modeToken = token;
+    }
 
-    // Modes are 0..3; anything else collapses to 1 so a corrupt plist cannot
-    // park the consumers in an undefined branch.
-    uint64_t normalized = (mode < 0 || mode >= 4) ? 1 : (uint64_t)(mode + 1);
-    uint32_t setStatus = notify_set_state(token, normalized);
-    BOOL ok = setStatus == NOTIFY_STATUS_OK;
-    uint32_t cancelStatus = notify_cancel(token);
-
-    uint32_t postStatus = 0;
-    if (ok) postStatus = notify_post(FG_NOTIFY_MODE);
-    if (!ok) NSLog(@"FlatGlass: failed to publish mode.");
-    FGDRecordPublish((FGDPublish){mode >= 0 && mode <= 3 ? (int)mode : FGD_OTHER,
-                     (int)normalized, FGDStatus(registerStatus), FGDStatus(setStatus),
-                     FGDStatus(cancelStatus), ok ? FGDStatus(postStatus) : FGD_UNOBSERVED}, fromChange);
-    return ok;
+    // Keep the name and its state alive even when no renderer has registered.
+    // Both the initial load and changes run on the same serial queue.
+    const uint32_t set = notify_set_state(*modeToken, (uint64_t)state);
+    sample.set = FGDStatus(set);
+    if (set == NOTIFY_STATUS_OK) sample.post = FGDStatus(notify_post(FG_NOTIFY_MODE));
+    else if (set == NOTIFY_STATUS_INVALID_TOKEN) *modeToken = -1;
+    FGDRecordPublish(sample, fromChange);
+    if (set != NOTIFY_STATUS_OK || sample.post != NOTIFY_STATUS_OK) {
+        NSLog(@"FlatGlass: mode publish failed (set %d, post %d)", sample.set, sample.post);
+        return NO;
+    }
+    return YES;
 }
 
 static void FGRemoveThemeAt(NSString *path) {
@@ -232,29 +253,29 @@ static BOOL FGValidIdentifier(NSString *identifier) {
 
 static int FGWatchMode(void) {
     FGDStartDaemon();
-    // Publish once at startup so consumers have a state even before the user
-    // touches the settings pane.
-    FGPublishMode(FGReadMode(), false);
+    dispatch_queue_t queue = dispatch_queue_create("local.lumid.flatglass.mode", DISPATCH_QUEUE_SERIAL);
+    if (!queue) return 1;
+    __block int modeToken = -1;
+    __block uint32_t watchStatus = NOTIFY_STATUS_FAILED;
+    dispatch_sync(queue, ^{
+        int settingsToken = 0;
+        watchStatus = notify_register_dispatch(FG_NOTIFY_SETTINGS, &settingsToken, queue, ^(int t) {
+            if (!FGPublishSavedMode(&modeToken, true)) return;
 
-    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
-    int token = 0;
-    int status = notify_register_dispatch(FG_NOTIFY_SETTINGS, &token, queue, ^(int t) {
-        NSInteger mode = FGReadMode();
-        FGPublishMode(mode, true);
-        NSLog(@"[FlatGlass] mode published: %ld", (long)mode);
-
-        // SnowBoard integrations regenerate their theme when it is present.
-        if ([[NSFileManager defaultManager] fileExistsAtPath:kSnowBoardPrefs]) {
-            notify_post("com.spark.snowboard.refreshNow");
-        }
+            // SnowBoard integrations regenerate their theme when it is present.
+            if ([[NSFileManager defaultManager] fileExistsAtPath:kSnowBoardPrefs]) {
+                notify_post("com.spark.snowboard.refreshNow");
+            }
+        });
+        FGDRecordWatch(FGDStatus(watchStatus));
+        // Subscribe before reading. Later callbacks run behind the startup
+        // read on this queue and always read the latest complete record.
+        FGPublishSavedMode(&modeToken, false);
     });
-
-    FGDRecordWatch(FGDStatus((uint32_t)status));
-    if (status != NOTIFY_STATUS_OK) {
-        NSLog(@"FlatGlass: cannot watch settings (%d)", status);
+    if (watchStatus != NOTIFY_STATUS_OK) {
+        NSLog(@"FlatGlass: cannot watch settings (%u)", watchStatus);
         return 1;
     }
-
     dispatch_main();
     return 0;
 }

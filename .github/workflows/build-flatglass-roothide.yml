@@ -1,8 +1,8 @@
-name: FlatGlass RootHide D2 diagnostic package
+name: FlatGlass RootHide D2 mode-delivery candidate
 
 on:
   push:
-    branches: [build/flatglass-1.8.4-roothide-diag2]
+    branches: [build/flatglass-1.8.4-roothide-d2-modefix1]
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 3
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Bind the source and record the toolchain
@@ -32,13 +32,12 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REPOSITORY:$GITHUB_EVENT_NAME:$GITHUB_REF" in
-            Tsangbaby/FlatGlass:push:refs/heads/build/flatglass-1.8.4-roothide-diag2) ;;
+            Tsangbaby/FlatGlass:push:refs/heads/build/flatglass-1.8.4-roothide-d2-modefix1) ;;
             *) printf '%s\n' 'Unexpected repository, event, or ref' >&2; exit 1 ;;
           esac
           source_sha=$(git rev-parse HEAD)
           test "$source_sha" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = 3d394edbb5f85094ba2938e4bd07dcb445503c6d
-          test "$(git rev-parse HEAD^^)" = e815a7385b08c13fe0b4456c5baa16202af241fc
+          test "$(git rev-parse HEAD^)" = f4a18ee0cd145880013e64f7e60a29a921ec4b85
           evidence="$RUNNER_TEMP/flatglass-artifacts"
           mkdir -p "$evidence"
           printf '%s\n' "FLATGLASS_ARTIFACT_DIR=$evidence" "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
@@ -138,7 +137,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: flatglass-roothide-diag2-${{ github.sha }}-${{ github.run_attempt }}
+          name: flatglass-roothide-d2-modefix1-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/flatglass-artifacts/
           if-no-files-found: error
           retention-days: 14

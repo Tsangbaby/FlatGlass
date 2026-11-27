@@ -13,9 +13,11 @@ flatglass_LIBRARIES += roothide
 endif
 
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+flatglass_FILES += ../Shared/FGModeStore.c
 TOOL_NAME += flatglassdiag
-flatglassdiag_FILES = FGDiagInstall.c FGDiagReport.c
-flatglassdiag_CFLAGS = -I../Shared
+flatglassdiag_FILES = FGDiagInstall.c FGDiagReport.c ../Shared/FGModeStore.c
+flatglassdiag_CFLAGS = -I../Shared -DFG_MODE_STORE_PREPARE=1
+flatglassdiag_LIBRARIES += roothide
 flatglassdiag_INSTALL_PATH = /usr/libexec
 endif
 

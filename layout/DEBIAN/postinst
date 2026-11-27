@@ -18,6 +18,13 @@ fgd_install_sample() {
 
 fgd_install_sample 1 -1 -1 || true
 
+# Provision only the package's directory; never change system preferences or
+# relabel an existing store. On failure the daemon uses system rendering.
+if [ "$DPKG_MAINTSCRIPT_ARCH" = iphoneos-arm64e ]; then
+  /usr/libexec/flatglassdiag --prepare-mode-store ||
+    printf '%s\n' 'FlatGlass: settings store not prepared; check installer output' >&2
+fi
+
 job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
 launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
   launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||

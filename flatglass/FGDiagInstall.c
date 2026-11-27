@@ -4,6 +4,12 @@
 #define _DEFAULT_SOURCE 1
 #endif
 #include "FGDiagnostics.h"
+#ifdef THEOS_PACKAGE_SCHEME_ROOTHIDE
+#include "FGModeStore.h"
+#include <roothide.h>
+#include <stdio.h>
+#include <string.h>
+#endif
 
 #include <errno.h>
 #include <grp.h>
@@ -32,6 +38,13 @@ static int parse_status(const char *s) {
 }
 
 int main(int argc, char **argv) {
+#ifdef THEOS_PACKAGE_SCHEME_ROOTHIDE
+    if (argc == 2 && strcmp(argv[1], "--prepare-mode-store") == 0) {
+        const int result = FGModeStorePrepare(jbroot(FG_MODE_PARENT), 501, 501);
+        if (result) fprintf(stderr, "FlatGlass: private mode directory unavailable (%d)\n", result);
+        return result ? 1 : 0;
+    }
+#endif
     if (argc != 4) return FGD_WRITE_INVALID;
     const int phase = parse_status(argv[1]);
     const int bootstrap = parse_status(argv[2]);

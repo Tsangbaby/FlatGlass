@@ -1,9 +1,7 @@
 # FlatGlass 1.8.4 — reconstructed source tree
 
-Package `local.lumid.flatglass` 1.8.4+diag.2, a diagnostic of the 1.8.4 build.
-This is a repaired reconstruction from
-the release binaries, not the author's original source or an installable
-package. It retains the four components and their notify chain.
+Package `local.lumid.flatglass` 1.8.4+diag.2.modefix.1, a RootHide settings-delivery
+candidate based only on D2. The D2 diagnostics and renderer are retained.
 
 ---
 
@@ -24,7 +22,7 @@ package. It retains the four components and their notify chain.
 
 ```
 Settings pane
-  writes CFPreferences "Mode"
+  persists the selected mode in the package's private RootHide data directory
   posts  local.lumid.flatglass.settings-changed
         │
         ▼
@@ -53,12 +51,27 @@ Mode values are **not** in display order — this trips people up:
 | Off | 2 | 3 |
 | Edge Only | 3 | 4 |
 
+### RootHide mode-delivery candidate
+
+The original D2 watcher read a system plist and could silently publish mode 0
+when reading was denied. The Settings pane and watcher now share the package's
+own `jbroot("/var/lib/local.lumid.flatglass")/mode.v1` (private directory 0700,
+record 0600). The installer creates only that directory and does not change
+existing system permissions. The pane copies a valid old selection once when
+opened after upgrade if the new record is missing; it leaves the legacy value
+intact for rollback. Thereafter a fresh watcher reads the record even with
+Settings closed. A missing/invalid startup value selects state 0 (system
+rendering); a later read failure leaves the published mode unchanged.
+The watcher keeps a token alive and SpringBoard does not write back old values.
+This changes settings delivery, not the renderer, filters, or cache policy.
+
 ### RootHide diagnostic D2
 
-D2 does not repair rendering. It retains the existing launchctl command and
-fallback order, renderer hooks, production notify lifetime, refresh route and
-cache actions. D2 uses its own diagnostic channels and file names, does not
-touch a D1 report, and uploads no data.
+D2's diagnostic channels, legacy report names and launchctl order are retained.
+No data is uploaded. If neither legacy watcher report can be written, the watcher
+also attempts `FlatGlassDiagnostics-d2.plist` under the private data directory.
+The fallback and the settings fix both need true device validation on the
+installed RootHide version. A missing report is still not evidence of no load.
 
 - `/var/mobile/Documents/FlatGlassDiagnostics-d2-install.plist` is written
   independently of the watcher by a short-lived installer probe that drops to

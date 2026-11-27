@@ -1,13 +1,13 @@
 Package: local.lumid.flatglass
-Name: FlatGlass (Diagnostic)
-Version: 1.8.4+diag.2
+Name: FlatGlass (D2 Mode Fix Test)
+Version: 1.8.4+diag.2.modefix.1
 Architecture: iphoneos-arm
 Depends: firmware (>= 15.0), mobilesubstrate, preferenceloader
 Section: Tweaks
 Maintainer: lumid
 Author: lumid
 Icon: file:///var/jb/Library/PreferenceBundles/FlatGlassPrefs.bundle/icon@3x.png
-Description: Temporary diagnostic for Home Screen icon mode delivery.
+Description: Settings-delivery test candidate with D2 diagnostics.
  .
- Reconstructed source tree. Same package identifier, same four components,
- same notify chain as the shipped 1.8.4 build.
+ Retains the FlatGlass renderer and refresh route. Uses a package-owned
+ RootHide mode record instead of reading a system preferences file.
