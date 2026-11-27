@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+case "${DPKG_MAINTSCRIPT_ARCH:-}" in
+  iphoneos-arm64e) prefix= ;; # RootHide bootstrap tools already use jbroot-relative paths.
+  iphoneos-arm64) prefix=/var/jb ;;
+  iphoneos-arm)   prefix= ;;
+  *) printf '%s\n' 'FlatGlass: unsupported package architecture' >&2; exit 1 ;;
+esac
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+if [ -n "$prefix" ]; then PATH="$prefix/usr/bin:$prefix/bin:$PATH"; fi
+export PATH
+job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
+launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
+  launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||
+  launchctl unload "$job" >/dev/null 2>&1 || true
+launchctl bootstrap system "$job" || launchctl load "$job"
