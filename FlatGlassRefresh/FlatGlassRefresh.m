@@ -21,6 +21,7 @@
 #import <UIKit/UIKit.h>
 #import <notify.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // ── 全局状态（对应原 __DATA 段） ────────────────────────────────────────────
 static int      RefreshStatusToken = -1;   // 0xc110

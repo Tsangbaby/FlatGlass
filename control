@@ -1,13 +1,11 @@
 Package: local.lumid.flatglass
 Name: FlatGlass
-Version: 1.8.4
-Architecture: iphoneos-arm64
-Depends: firmware (>= 15.0), mobilesubstrate, preferenceloader
+Version: 1.8.4+roothide.test1
+Architecture: iphoneos-arm64e
+Depends: firmware (>= 15.0), mobilesubstrate, preferenceloader, roothide
 Section: Tweaks
 Maintainer: lumid
 Author: lumid
-Icon: file:///var/jb/Library/PreferenceBundles/FlatGlassPrefs.bundle/icon@3x.png
-Header: file:///var/jb/Library/PreferenceBundles/FlatGlassPrefs.bundle/banner-1.6.4.png
 Description: Customize the highlights on your Home Screen icons.
  .
  - **Remove Highlights** rebuilds supported layered icons with a flat finish.
@@ -16,6 +14,6 @@ Description: Customize the highlights on your Home Screen icons.
  .
  Choose a mode in **Settings → FlatGlass**. Settings are available in English and Russian. If the Home Screen keeps showing the previous finish, respring to apply the change.
  .
- Rootful and rootless builds are available. Requires a tweak injector and PreferenceLoader.
+ Native RootHide test build. Requires a tweak injector and PreferenceLoader.
  .
  IconServices hooks and rendering adapted from IconGlare by evgeniy558.

@@ -10,16 +10,10 @@
 #import <Preferences/PSSpecifier.h>
 #import <UIKit/UIKit.h>
 #import <notify.h>
+#import "../Shared/FGPreferences.h"
 
-static NSString *const kFlatGlassPrefsPath = @"/var/mobile/Library/Preferences/local.lumid.flatglass.plist";
-static NSString *const kFlatGlassChangedNotification = @"local.lumid.flatglass.settings-changed";
-
-// 与 Root.plist 的 validValues 一一对应（注意顺序不是 0,1,2,3）
-//   0 = Remove Highlights   3 = Edge Only   1 = Edge and Artwork   2 = Off
-static const NSInteger kModeRemove  = 0;
-static const NSInteger kModeEdge    = 3;
-static const NSInteger kModeArtwork = 1;
-static const NSInteger kModeOff     = 2;
+@interface FGSettingsListController : PSListController
+@end
 
 @implementation FGSettingsListController
 
@@ -40,7 +34,7 @@ static const NSInteger kModeOff     = 2;
 }
 
 // 原 0x418c：把 Root.plist 里写死英文的 footer 与 Mode 标题替换成当前语言。
-- (NSArray *)specifiers {
+- (NSMutableArray *)specifiers {
     if (!_specifiers) {
         _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
     }
@@ -55,10 +49,10 @@ static const NSInteger kModeOff     = 2;
         if ([[spec propertyForKey:@"key"] isEqualToString:@"Mode"]) {
             [spec setName:[self localized:@"mode"]];
             [spec setTitleDictionary:@{
-                @(kModeRemove)  : [self localized:@"remove"],
-                @(kModeEdge)    : [self localized:@"edge"],
-                @(kModeArtwork) : [self localized:@"artwork"],
-                @(kModeOff)     : [self localized:@"off"],
+                @(FGModeRemove)  : [self localized:@"remove"],
+                @(FGModeEdge)    : [self localized:@"edge"],
+                @(FGModeArtwork) : [self localized:@"artwork"],
+                @(FGModeOff)     : [self localized:@"off"],
             }];
         }
     }
@@ -67,22 +61,19 @@ static const NSInteger kModeOff     = 2;
 
 // 原 0x44e4：读 Mode，越界（<0 或 >3）当 0 处理。
 - (id)readMode:(PSSpecifier *)spec {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:kFlatGlassPrefsPath];
-    NSInteger mode = [[prefs objectForKeyedSubscript:@"Mode"] integerValue];
-    if (mode < 0 || mode > 3) mode = 0;
-    return @(mode);
+    return @(FGReadMode());
 }
 
 // 原 0x456c：写 Mode 并广播。注意它写的是「只含 Mode 一个键」的新字典，
 // 也就是整份 plist 被覆盖——目前 plist 里确实只有这一个键，维护时若要
 // 加新键，这里必须改成「读出 → 改 → 写回」。
 - (void)writeMode:(id)value specifier:(PSSpecifier *)spec {
-    NSInteger mode = [value integerValue];
-    if (mode < 0 || mode > 3) return;
+    FGMode mode;
+    if (!FGDecodePreferenceMode(value, &mode)) return;
 
-    BOOL ok = [@{ @"Mode": @(mode) } writeToFile:kFlatGlassPrefsPath atomically:YES];
+    BOOL ok = [@{ FGModeKey: @(mode) } writeToFile:FGPreferencesPath() atomically:YES];
     if (ok) {
-        notify_post(kFlatGlassChangedNotification.UTF8String);
+        notify_post(FGSettingsChangedNotification);
         return;
     }
 

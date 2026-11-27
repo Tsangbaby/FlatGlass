@@ -1,3 +1,5 @@
+include $(THEOS)/makefiles/common.mk
+
 LIBRARY_NAME = FlatGlassRefresh
 
 FlatGlassRefresh_FILES = $(wildcard *.m)

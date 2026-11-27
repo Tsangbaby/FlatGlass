@@ -12,6 +12,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <objc/runtime.h>
 #import <notify.h>
+#include "FGRenderPolicy.h"
 
 #pragma mark - 绘制上下文
 
@@ -78,7 +79,6 @@ extern Class FGAppRecipeClass;           // 0x18d38  ISiOSAppRecipe
 extern Class FGResourceClass;            // 0x18d40  ISAssetCatalogResource
 extern IMP  FGOriginalResourceImage;     // 0x18d48
 extern IMP  FGOriginalComposedImage;     // 0x18d50
-extern BOOL FGGNoEdge;                   // 0x18d68  原 gGlassNoEdge
 
 // 日志钩子，默认 NULL（原二进制从不给它赋值）。调试时在 %ctor 里设成 NSLog 即可。
 extern void (*FGLog)(NSString *message);
@@ -86,8 +86,6 @@ extern void (*FGLog)(NSString *message);
 #pragma mark - 常量
 
 #define FG_DEFAULT_SIDE      1024.0
-#define FG_MIN_PIXELS        16
-#define FG_MAX_PIXELS        1024
 #define FG_LAYOUT_GROUP      1020      // 0x3fc
 #define FG_LAYOUT_FILL       1021      // 0x3fd
 #define FG_LAYOUT_FILL_ALT   1009      // 0x3f1
@@ -125,7 +123,7 @@ BOOL FGDrawContents(CGContextRef c, id catalog, NGRendition *r, CGRect frame);
 // 生成（FGCreate.m / FGGlass.m）
 CGColorSpaceRef FGSharedExtendedSRGB(void);
 
-// IconGlare 原语（FGIconGlare.c）
+// IconGlare 原语（FGIconGlare.m）
 float *FGIconShape(int n);                       // n*n 的 squircle 覆盖率（1.0 = 实心）
 void   FGGaussianBlur(float *plane, int n, float sigma);
 void   FGBoxPass(float *plane, float *row, int n, int r, int dir);
@@ -138,7 +136,7 @@ CGImageRef NGCreateFlatIcon(id catalog, NSString *name, uint32_t appearance, siz
 CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, size_t px);
 CGImageRef NGCreateGlassIconContent(id catalog, NSString *name, uint32_t appearance, size_t px);
 CGImageRef NGCreateRimmedImage(CGImageRef src);
-CGImageRef NGCreateGlassedImage(CGImageRef src, int flag);
+CGImageRef NGCreateGlassedImage(CGImageRef src);
 id         FGWrapImage(CGImageRef img, double scale);
 
 #endif /* FG_INTERNAL_H */

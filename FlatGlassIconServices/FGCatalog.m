@@ -10,10 +10,9 @@
 //
 
 #import "FGInternal.h"
+#import "FGPrivateCalls.h"
 #import <dlfcn.h>
 #import <compression.h>
-#include <string.h>
-#include <dlfcn.h>
 
 @implementation NGRendition @end
 @implementation NGLayerRef @end
@@ -221,9 +220,12 @@ BOOL FGDrawContents(CGContextRef c, id catalog, NGRendition *r, CGRect frame) {
         SEL selRend    = NSSelectorFromString(@"renditionWithKey:");
         SEL selImage   = NSSelectorFromString(@"unslicedImage");
 
-        id store = ((id (*)(id, SEL))objc_msgSend)(catalog, selStore);
-        id themeRendition = ((id (*)(id, SEL, void *))objc_msgSend)(store, selRend, key.bytes);
-        CGImageRef img = (CGImageRef)((id (*)(id, SEL))objc_msgSend)(themeRendition, selImage);
+        id store = FGPrivateObject(catalog, selStore);
+        if (!FGMethodIs(FGGetMethod(store, selRend), 1, "@", "^", NULL)) return NO;
+        NS_VALID_UNTIL_END_OF_SCOPE id themeRendition =
+            ((id (*)(id, SEL, const void *))objc_msgSend)(store, selRend, key.bytes);
+        if (!FGMethodIs(FGGetMethod(themeRendition, selImage), 0, @encode(CGImageRef), NULL, NULL)) return NO;
+        CGImageRef img = ((CGImageRef (*)(id, SEL))objc_msgSend)(themeRendition, selImage);
         if (!img) return NO;
 
         CGContextSaveGState(c);
@@ -419,46 +421,41 @@ NGCatalogIndex *FGIndexFor(id catalog) {
 
         NGCatalogIndex *index = [NGCatalogIndex new];
 
-        id store = nil, themeStore = nil;
-        @try { store = [catalog valueForKey:@"_themeStore"]; } @catch (__unused NSException *e) {}
-        @try { themeStore = [store valueForKey:@"themeStore"]; } @catch (__unused NSException *e) {}
+        @try {
+            id store = FGPrivateObject(catalog, NSSelectorFromString(@"_themeStore"));
+            id themeStore = FGPrivateObject(store, NSSelectorFromString(@"themeStore"));
+            SEL enumSel = @selector(enumerateKeysAndObjectsUsingBlock:);
+            SEL formatSel = NSSelectorFromString(@"keyFormat");
+            if (!FGMethodIs(FGGetMethod(themeStore, formatSel), 0, "^", NULL, NULL) ||
+                !FGMethodIs(FGGetMethod(themeStore, enumSel), 1, "v", "@?", NULL) ||
+                [themeStore isKindOfClass:[NSDictionary class]]) return nil;
 
-        if (!themeStore) {
-            if (FGLog) FGLog([NSString stringWithFormat:@"no storage for %@", catalog]);
+            // Original contract: { u32, u32, u32 count, u32 tokens[] } owned by
+            // the theme store. KVC may box pointers; never reinterpret an object.
+            const uint32_t *format = ((const uint32_t *(*)(id, SEL))objc_msgSend)(themeStore, formatSel);
+            if (!format) return nil;
+            uint32_t tokenCount = format[2];
+            if (tokenCount == 0 || tokenCount > 64) return nil;
+            NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:tokenCount];
+            for (uint32_t i = 0; i < tokenCount; i++) [tokens addObject:@(format[3 + i])];
+            index.tokens = tokens;
+
+            id appearances = FGPrivateObject(themeStore, @selector(appearances));
+            if ([appearances isKindOfClass:[NSDictionary class]]) index.appearances = appearances;
+
+            // Original block type v24@?0r^v8@16: not NSDictionary's
+            // (id key, id value, BOOL *stop). The raw key is only used synchronously.
+            NSMutableArray *rends = [NSMutableArray array];
+            ((void (*)(id, SEL, void (^)(const void *, id)))objc_msgSend)(themeStore, enumSel,
+                ^(const void *key, id value) {
+                    if (key) FGAddRendition(rends, key, tokenCount, value);
+                });
+            index.renditions = rends;
             objc_setAssociatedObject(catalog, kFGIndexKey, index, OBJC_ASSOCIATION_RETAIN);
             return index;
+        } @catch (__unused NSException *e) {
+            return nil;
         }
-
-        // tokens 来自 keyFormat：{ u32, u32, u32 count, u32 values[] }
-        NSMutableArray *tokens = [NSMutableArray array];
-        @try {
-            id kf = [themeStore valueForKey:@"keyFormat"];
-            const uint32_t *raw = NULL;
-            if ([kf isKindOfClass:[NSData class]]) raw = ((NSData *)kf).bytes;
-            else raw = (const uint32_t *)(__bridge void *)kf;
-            if (raw && raw[2]) {
-                for (uint32_t i = 0; i < raw[2]; i++) [tokens addObject:@(raw[3 + i])];
-            }
-        } @catch (__unused NSException *e) {}
-        index.tokens = tokens;
-
-        @try { index.appearances = [themeStore valueForKey:@"appearances"]; }
-        @catch (__unused NSException *e) {}
-
-        NSMutableArray *rends = [NSMutableArray array];
-        NSUInteger tokenCount = tokens.count;
-        @try {
-            [themeStore enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
-                const void *keyBytes = NULL;
-                if ([key isKindOfClass:[NSData class]]) keyBytes = ((NSData *)key).bytes;
-                else keyBytes = (const void *)(__bridge const void *)key;
-                FGAddRendition(rends, keyBytes, tokenCount, value);
-            }];
-        } @catch (__unused NSException *e) {}
-
-        index.renditions = rends;
-        objc_setAssociatedObject(catalog, kFGIndexKey, index, OBJC_ASSOCIATION_RETAIN);
-        return index;
     }
 }
 
@@ -472,7 +469,7 @@ BOOL FGHasLayeredPrimaryResource(id self) {
     static NSString *primaryKey;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        void **sym = (void **)dlsym((void *)-2 /* RTLD_DEFAULT */, "kISPrimaryResourceKey");
+        void **sym = (void **)dlsym(RTLD_DEFAULT, "kISPrimaryResourceKey");
         NSString *key = @"kISPrimaryResourceKey";
         if (sym && *sym) key = (__bridge NSString *)(*sym);
         primaryKey = [key copy];
@@ -480,15 +477,17 @@ BOOL FGHasLayeredPrimaryResource(id self) {
 
     id provider = nil;
     @try { provider = [self valueForKey:@"resourceProvider"]; } @catch (__unused NSException *e) {}
-    if (![provider respondsToSelector:@selector(resourceNamed:)]) return NO;
+    SEL named = @selector(resourceNamed:);
+    if (!FGOriginalResourceImage || !FGResourceClass ||
+        !FGMethodIs(FGGetMethod(provider, named), 1, "@", "@", NULL)) return NO;
 
-    id resource = nil;
-    @try { resource = [provider resourceNamed:primaryKey]; } @catch (__unused NSException *e) {}
-    if (!FGOriginalResourceImage) return NO;
-    if (!FGResourceClass || ![resource isKindOfClass:FGResourceClass]) return NO;
-
-    id catalog2 = [resource catalog];
-    NSString *imageName = [resource imageName];
-    if (!catalog2 || !imageName) return NO;
-    return FGHasStack(catalog2, imageName);
+    @try {
+        id resource = ((id (*)(id, SEL, NSString *))objc_msgSend)(provider, named, primaryKey);
+        if (![resource isKindOfClass:FGResourceClass]) return NO;
+        id catalog2 = FGPrivateObject(resource, @selector(catalog));
+        NSString *imageName = FGPrivateObject(resource, @selector(imageName));
+        return catalog2 && [imageName isKindOfClass:[NSString class]] && FGHasStack(catalog2, imageName);
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
 }

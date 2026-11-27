@@ -1,9 +1,24 @@
 #!/bin/sh
-set -e
-prefix='/var/jb'
-PATH="$prefix/usr/bin:$prefix/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
-launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
-  launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||
-  launchctl unload "$job" >/dev/null 2>&1 || true
+set -eu
+
+case "${1:-}" in
+  configure|abort-upgrade|abort-remove|abort-deconfigure) ;;
+  *) exit 0 ;;
+esac
+
+# Bootstrap commands use jbroot-relative paths in the native package.
+prefix=''
+PATH="$prefix/usr/bin:$prefix/bin:$prefix/usr/sbin:$prefix/sbin${prefix:+:/usr/bin:/bin:/usr/sbin:/sbin}"
+export PATH
+label=local.lumid.flatglass
+job="$prefix/Library/LaunchDaemons/$label.plist"
+
+# Stop a previous job in either domain, including a user-domain legacy job.
+stopped=0
+launchctl bootout "system/$label" >/dev/null 2>&1 && stopped=1
+launchctl bootout "user/foreground/$label" >/dev/null 2>&1 && stopped=1
+if [ "$stopped" = 0 ]; then
+  launchctl unload "$job" >/dev/null 2>&1 || :
+fi
+
 launchctl bootstrap system "$job" || launchctl load "$job"

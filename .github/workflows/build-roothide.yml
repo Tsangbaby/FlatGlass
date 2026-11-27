@@ -1,0 +1,169 @@
+name: Build FlatGlass RootHide package
+
+on:
+  push:
+    branches: [build/roothide-test1]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      THEOS_REF: 958fea4f779943505b15b93c88bb4db8d97b346d
+      SDK_REF: 0222fd5413cf4b9af096f37b4621afa2688572f7
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      LC_ALL: C
+      TZ: UTC
+
+    steps:
+      - name: Prepare diagnostic directory
+        run: |
+          set -euo pipefail
+          {
+            printf 'THEOS=%s/flatglass-theos\n' "$RUNNER_TEMP"
+            printf 'LOG_DIR=%s/flatglass-logs\n' "$RUNNER_TEMP"
+            printf 'PACKAGE_DIR=%s/flatglass-packages\n' "$RUNNER_TEMP"
+            printf 'ARTIFACT_DIR=%s/flatglass-verified\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/flatglass-logs" "$RUNNER_TEMP/flatglass-packages" "$RUNNER_TEMP/flatglass-verified"
+          printf 'Ref: %s\nSource commit: %s\n' "$GITHUB_REF" "$GITHUB_SHA" | tee "$RUNNER_TEMP/flatglass-logs/source.log"
+
+      - name: Check out FlatGlass
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode and install host build tools
+        run: |
+          set -euo pipefail
+          {
+            sw_vers
+            uname -m
+            test -d "$DEVELOPER_DIR"
+            sudo xcode-select --switch "$DEVELOPER_DIR"
+            xcode_version=$(xcodebuild -version)
+            printf '%s\n' "$xcode_version"
+            [[ $xcode_version == $'Xcode 16.4\nBuild version 16F6' ]]
+            xcrun --sdk iphoneos clang --version
+            xcrun --sdk iphoneos --show-sdk-version
+            brew install ldid make dpkg rsync xz
+            brew list --versions ldid make dpkg rsync xz
+            command -v ldid
+            gmake --version
+            dpkg-deb --version
+            git --version
+            python3 --version
+          } 2>&1 | tee "$LOG_DIR/toolchain.log"
+
+      - name: Fetch pinned official RootHide Theos and iPhoneOS SDK
+        run: |
+          set -euo pipefail
+          {
+            git init "$THEOS"
+            git -C "$THEOS" remote add origin https://github.com/roothide/theos
+            git -C "$THEOS" fetch --depth 1 origin "$THEOS_REF"
+            git -C "$THEOS" checkout --detach FETCH_HEAD
+            git -C "$THEOS" submodule update --init --recursive --jobs 4
+            test "$(git -C "$THEOS" rev-parse HEAD)" = "$THEOS_REF"
+            printf 'Theos: %s\n' "$THEOS_REF"
+            subs=$(git -C "$THEOS" submodule status --recursive)
+            printf '%s\n' "$subs"
+            while IFS= read -r line; do
+              [[ $line == ' '* ]]
+            done <<< "$subs"
+            for header in PSListController.h PSSpecifier.h; do
+              test -s "$THEOS/vendor/include/Preferences/$header"
+              printf 'Preferences header: %s\n' "$header"
+            done
+
+            sdk_repo="$RUNNER_TEMP/flatglass-sdks"
+            sdk_name=iPhoneOS16.5.sdk
+            git init "$sdk_repo"
+            git -C "$sdk_repo" remote add origin https://github.com/theos/sdks
+            git -C "$sdk_repo" config remote.origin.promisor true
+            git -C "$sdk_repo" config remote.origin.partialclonefilter blob:none
+            git -C "$sdk_repo" sparse-checkout set "$sdk_name"
+            git -C "$sdk_repo" fetch --depth 1 --filter=blob:none origin "$SDK_REF"
+            git -C "$sdk_repo" checkout --detach FETCH_HEAD
+            test "$(git -C "$sdk_repo" rev-parse HEAD)" = "$SDK_REF"
+            mv "$sdk_repo/$sdk_name" "$THEOS/sdks/"
+            printf 'Target SDK: %s from theos/sdks at %s\n' "$sdk_name" "$SDK_REF"
+            test -s "$THEOS/sdks/$sdk_name/SDKSettings.plist"
+            stub="$THEOS/sdks/$sdk_name/System/Library/PrivateFrameworks/Preferences.framework/Preferences.tbd"
+            printf '%s  %s\n' '9daceaff6cf94346594a12f9ef9c2ea23de15475b516f9e33c20871a018c098b' "$stub" | shasum -a 256 -c -
+          } 2>&1 | tee "$LOG_DIR/inputs.log"
+
+      - name: Run host tests
+        run: |
+          set -euo pipefail
+          {
+            for test_script in Tests/run-daemon-tests.sh Tests/test-package-scripts.sh Tests/run-render-tests.sh; do
+              if [[ -f "$test_script" ]]; then
+                printf '== %s ==\n' "$test_script"
+                bash -e -o pipefail "$test_script"
+              else
+                printf 'Skipping absent test: %s\n' "$test_script"
+              fi
+            done
+          } 2>&1 | tee "$LOG_DIR/tests.log"
+
+      - name: Build signed RootHide package
+        run: |
+          set -euo pipefail
+          {
+            umask 022
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            export SOURCE_DATE_EPOCH
+            SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+            # Pinned Theos defaults to dm.pl, which ignores SOURCE_DATE_EPOCH.
+            # Use native dpkg-deb with root ownership in the tar, without sudo.
+            builder="$RUNNER_TEMP/flatglass-dpkg-deb"
+            printf '%s\n' '#!/bin/sh' 'exec dpkg-deb --root-owner-group "$@"' > "$builder"
+            chmod 755 "$builder"
+            printf 'Scheme: roothide\nTarget: iphone:clang:16.5:15.0\nSOURCE_DATE_EPOCH: %s\n' "$SOURCE_DATE_EPOCH"
+            gmake package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide \
+              TARGET=iphone:clang:16.5:15.0 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip \
+              TARGET_CODESIGN="$(command -v ldid)" _THEOS_PLATFORM_DPKG_DEB="$builder" \
+              THEOS_PACKAGE_DIR="$PACKAGE_DIR"
+          } 2>&1 | tee "$LOG_DIR/build.log"
+
+      - name: Validate package and write SHA-256 report
+        run: |
+          set -euo pipefail
+          {
+            shopt -s nullglob
+            packages=("$PACKAGE_DIR"/*.deb)
+            if [[ ${#packages[@]} != 1 || ! -f "${packages[0]}" || -L "${packages[0]}" ]]; then
+              printf 'Expected exactly one built .deb, found %s\n' "${#packages[@]}" >&2
+              exit 1
+            fi
+            python3 -u Scripts/validate_package.py "${packages[0]}"
+            mv "${packages[0]}" "$ARTIFACT_DIR/"
+            (cd "$ARTIFACT_DIR" && shasum -a 256 -- ./*.deb > SHA256SUMS)
+          } 2>&1 | tee "$LOG_DIR/validation.log"
+          cp "$LOG_DIR"/*.log "$ARTIFACT_DIR/"
+
+      - name: Upload verified artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flatglass-roothide-build
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failure diagnostics (logs only)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flatglass-roothide-diagnostics
+          path: ${{ env.LOG_DIR }}/*.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -14,8 +14,7 @@
 //
 
 #import "FGInternal.h"
-#import <math.h>
-#include <string.h>
+#import "FGPrivateCalls.h"
 
 int  FGModeToken = -1;
 Class FGImageClass = Nil;
@@ -23,7 +22,6 @@ Class FGAppRecipeClass = Nil;
 Class FGResourceClass = Nil;
 IMP  FGOriginalResourceImage = NULL;
 IMP  FGOriginalComposedImage = NULL;
-BOOL FGGNoEdge = NO;
 
 void (*FGLog)(NSString *message) = NULL;
 
@@ -47,27 +45,18 @@ static id ReadProperty(id object, NSString *key) {
 // 原 0x4bec WrapImage
 id FGWrapImage(CGImageRef img, double scale) {
     if (!img) return nil;
-    if (!FGImageClass) { CGImageRelease(img); return nil; }
-    id out = [[FGImageClass alloc] initWithCGImage:img scale:scale];
-    CGImageRelease(img);
-    return out;
+    @try {
+        Method init = class_getInstanceMethod(FGImageClass, @selector(initWithCGImage:scale:));
+        if (!FGMethodIs(init, 2, "@", @encode(CGImageRef), @encode(CGFloat))) return nil;
+        return [(id<FGPrivateImage>)[FGImageClass alloc] initWithCGImage:img scale:scale];
+    } @finally {
+        CGImageRelease(img);
+    }
 }
 
 // 原 0x4224 IsImageRenderer：签名必须严格匹配
-//   - (id)imageForSize:(CGSize)size scale:(CGFloat)scale
 static BOOL IsImageRenderer(Method m) {
-    if (!m) return NO;
-    if (method_getNumberOfArguments(m) != 4) return NO;
-    char ret[32] = {0};
-    method_getReturnType(m, ret, sizeof(ret));
-    if (ret[0] != '@') return NO;
-    char arg2[128] = {0};
-    method_getArgumentType(m, 2, arg2, sizeof(arg2));
-    if (strcmp(arg2, "{CGSize=dd}") != 0) return NO;
-    char arg3[32] = {0};
-    method_getArgumentType(m, 3, arg3, sizeof(arg3));
-    if (arg3[0] != 'd') return NO;
-    return YES;
+    return FGMethodIs(m, 2, "@", @encode(CGSize), @encode(CGFloat));
 }
 
 // 当前模式：notify state 1..4 -> Mode 0..3；其它一律 -1
@@ -129,67 +118,67 @@ static void InvalidateCache(BOOL force) {
 // 原 0x462c ResourceImage —— ISAssetCatalogResource 的 -imageForSize:scale:
 static id ResourceImage(id self, SEL _cmd, CGSize size, double scale) {
     const int mode = FGCurrentMode();
-
-    // 模式无效 / Off / 尺寸异常，一律交回系统
-    if (mode < 0 || mode == 2) goto passthrough;
-    if (!isnormal(size.width) || !isnormal(size.height) || !isnormal(scale)) goto passthrough;
-    if (size.width <= 0 || size.height <= 0 || scale <= 0) goto passthrough;
-
-    {
-        id catalog = [self catalog];
-        NSString *name = [self imageName];
-        uint32_t appearance = 0;
-        if ([self respondsToSelector:@selector(catalogAppearance)]) {
-            appearance = (uint32_t)[self catalogAppearance];
+    FGRenderDimensions dims;
+    if (mode >= 0 && mode != 2 && FGResolveRenderDimensions(size.width, size.height, scale, &dims)) {
+        @try {
+            id catalog = FGPrivateObject(self, @selector(catalog));
+            NSString *name = FGPrivateObject(self, @selector(imageName));
+            if (catalog && [name isKindOfClass:[NSString class]] && name.length) {
+                SEL sel = @selector(catalogAppearance);
+                Method appearanceMethod = FGGetMethod(self, sel);
+                uint64_t appearance = 0;
+                if (appearanceMethod) {
+                    if (FGMethodIs(appearanceMethod, 0, "Q", NULL, NULL) ||
+                        FGMethodIs(appearanceMethod, 0, "q", NULL, NULL)) {
+                        appearance = ((uint64_t (*)(id, SEL))objc_msgSend)(self, sel);
+                    } else {
+                        appearance = UINT64_MAX;    // 未知 ABI：交回系统
+                    }
+                }
+                if (appearance <= 2 && FGHasStack(catalog, name)) {
+                    CGImageRef img = mode == 1
+                        ? NGCreateGlassIconContent(catalog, name, (uint32_t)appearance, dims.pixelSide)
+                        : NGCreateFlatIcon(catalog, name, (uint32_t)appearance, dims.pixelSide);
+                    id wrapped = FGWrapImage(img, dims.imageScale);
+                    if (wrapped) return wrapped;
+                }
+            }
+        } @catch (__unused NSException *e) {
+            // 私有实现变更时仍走原渲染路径。
         }
-        if (appearance > 2) goto passthrough;
-        if (!catalog || name.length == 0) goto passthrough;
-        if (!FGHasStack(catalog, name)) goto passthrough;
-
-        double side = fmax(size.width, size.height) * scale;
-        uint32_t px = (uint32_t)ceil(side);
-        if (px < FG_MIN_PIXELS) px = FG_MIN_PIXELS;
-        if (px > FG_MAX_PIXELS) px = FG_MAX_PIXELS;
-
-        CGImageRef img = (mode == 1)
-            ? NGCreateGlassIconContent(catalog, name, appearance, px)
-            : NGCreateFlatIcon(catalog, name, appearance, px);
-
-        id wrapped = FGWrapImage(img, (double)px / scale);
-        if (wrapped) return wrapped;
     }
-
-passthrough:
     if (!FGOriginalResourceImage) return nil;
     return ((id (*)(id, SEL, CGSize, double))FGOriginalResourceImage)(self, _cmd, size, scale);
 }
 
 // 原 0x48e0 ComposedImage —— ISCompositor 的 -imageForSize:scale:
 static id ComposedImage(id self, SEL _cmd, CGSize size, double scale) {
-    id original = ((id (*)(id, SEL, CGSize, double))FGOriginalComposedImage)(self, _cmd, size, scale);
-
+    if (!FGOriginalComposedImage) return nil;
+    id<FGPrivateImage> original =
+        ((id (*)(id, SEL, CGSize, double))FGOriginalComposedImage)(self, _cmd, size, scale);
     const int mode = FGCurrentMode();
-    if (mode < 0 || (mode & 1) == 0) return original;      // 只处理 1 / 3
-    if (![original respondsToSelector:@selector(CGImage)] ||
-        ![original respondsToSelector:@selector(scale)]) return original;
+    if (mode != 1 && mode != 3) return original;
+    @try {
+        if (!FGMethodIs(FGGetMethod(original, @selector(CGImage)), 0, @encode(CGImageRef), NULL, NULL) ||
+            !FGMethodIs(FGGetMethod(original, @selector(scale)), 0, @encode(CGFloat), NULL, NULL)) return original;
 
-    id elements = ReadProperty(self, @"elements");
-    id first = [elements respondsToSelector:@selector(firstObject)] ? [elements firstObject] : nil;
-    id recipe = ReadProperty(first, @"recipe") ?: ReadProperty(self, @"recipe");
-    if (!FGAppRecipeClass || ![recipe isKindOfClass:FGAppRecipeClass]) return original;
+        id elements = ReadProperty(self, @"elements");
+        id first = FGPrivateObject(elements, @selector(firstObject));
+        id recipe = ReadProperty(first, @"recipe") ?: ReadProperty(self, @"recipe");
+        if (!FGAppRecipeClass || ![recipe isKindOfClass:FGAppRecipeClass]) return original;
 
-    CGImageRef cg = [original CGImage];
-    if (!cg) return original;
-    if (CGImageGetWidth(cg) != CGImageGetHeight(cg)) return original;
-    if (CGImageGetWidth(cg) > 1024) return original;
-
-    const double srcScale = [original scale];
-    CGImageRef out = (mode == 1 && FGHasLayeredPrimaryResource(self))
-        ? NGCreateRimmedImage(cg)
-        : NGCreateGlassedImage(cg, 0);
-
-    id wrapped = FGWrapImage(out, srcScale);
-    return wrapped ?: original;
+        CGImageRef cg = [original CGImage];
+        if (!cg) return original;
+        size_t side = CGImageGetWidth(cg);
+        if (side != CGImageGetHeight(cg) || side > FG_MAX_PIXELS) return original;
+        const CGFloat srcScale = [original scale];
+        if (!isnormal(srcScale) || srcScale <= 0) return original;
+        FGComposedStyle style = FGComposedStyleForMode(mode, mode == 1 && FGHasLayeredPrimaryResource(self));
+        CGImageRef out = style == FGRenderGlassed ? NGCreateGlassedImage(cg) : NGCreateRimmedImage(cg);
+        return FGWrapImage(out, srcScale) ?: original;
+    } @catch (__unused NSException *e) {
+        return original;
+    }
 }
 
 #pragma mark - 入口
@@ -209,21 +198,26 @@ static void StartFlatGlassIconServices(void) {
         Method mCmp = compositor
             ? class_getInstanceMethod(compositor, @selector(imageForSize:scale:)) : NULL;
 
-        BOOL okRes = IsImageRenderer(mRes)
-                  && [FGResourceClass instancesRespondToSelector:@selector(catalog)]
-                  && [FGResourceClass instancesRespondToSelector:@selector(imageName)]
-                  && [FGImageClass instancesRespondToSelector:@selector(initWithCGImage:scale:)];
-        BOOL okCmp = FGAppRecipeClass && IsImageRenderer(mCmp);
+        Method imageInit = class_getInstanceMethod(FGImageClass, @selector(initWithCGImage:scale:));
+        BOOL canWrap = FGMethodIs(imageInit, 2, "@", @encode(CGImageRef), @encode(CGFloat));
+        BOOL okRes = canWrap && IsImageRenderer(mRes)
+                  && FGMethodIs(class_getInstanceMethod(FGResourceClass, @selector(catalog)), 0, "@", NULL, NULL)
+                  && FGMethodIs(class_getInstanceMethod(FGResourceClass, @selector(imageName)), 0, "@", NULL, NULL);
+        BOOL okCmp = canWrap && FGAppRecipeClass && IsImageRenderer(mCmp);
 
         if (!okRes && !okCmp) {
             NSLog(@"FlatGlass: compatible IconServices methods were not found.");
             return;
         }
 
-        notify_register_dispatch(kModeNotifyName.UTF8String, &FGModeToken,
-                                 dispatch_get_main_queue(), ^(int token) {
+        if (notify_register_dispatch(kModeNotifyName.UTF8String, &FGModeToken,
+                                     dispatch_get_main_queue(), ^(__unused int token) {
             InvalidateCache(YES);
-        });
+        }) != NOTIFY_STATUS_OK) {
+            FGModeToken = -1;
+            NSLog(@"FlatGlass: mode notification registration failed; using system rendering.");
+            return;
+        }
 
         if (okRes) {
             FGOriginalResourceImage = method_getImplementation(mRes);

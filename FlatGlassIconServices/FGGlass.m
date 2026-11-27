@@ -17,7 +17,7 @@
 //    · Mode 1（Edge and Artwork）当前 ≈ 原版的“只有边”效果
 //    · NGCreateRimmedImage / NGCreateGlassedImage 亦是如此
 //  要和 v1.8.4 逐像素一致，下一步是把 B_glass.c 的 IGDrawGroup 段编译化
-//  （接口已在 FGIconGlare.c 里留好：FGIconShape / FGEdt / FGDrawOutline /
+//  （接口已在 FGIconGlare.m 里留好：FGIconShape / FGEdt / FGDrawOutline /
 //   FGDrawChicletHighlights）。
 //
 
@@ -34,11 +34,13 @@ typedef struct {
 } FGPlanes;
 
 static BOOL FGLoadPlanes(CGImageRef src, FGPlanes *out) {
+    if (!src) return NO;
     size_t w = CGImageGetWidth(src), h = CGImageGetHeight(src);
-    if (!w || w != h) return NO;
+    if (!w || w != h || w > FG_MAX_PIXELS) return NO;
     int n = (int)w;
 
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    if (!cs) return NO;
     CGContextRef c = CGBitmapContextCreate(NULL, n, n, 8, 0, cs,
                                            kCGBitmapByteOrder32Little |
                                            kCGImageAlphaPremultipliedFirst);
@@ -50,9 +52,9 @@ static BOOL FGLoadPlanes(CGImageRef src, FGPlanes *out) {
 
     const uint8_t *data = CGBitmapContextGetData(c);
     size_t stride = CGBitmapContextGetBytesPerRow(c);
-    float *rgb = malloc((size_t)n * n * 3 * sizeof(float));
+    float *rgb = calloc((size_t)n * n * 3, sizeof(float));
     float *alpha = malloc((size_t)n * n * sizeof(float));
-    if (!rgb || !alpha) {
+    if (!data || !rgb || !alpha) {
         free(rgb); free(alpha);
         CGContextRelease(c);
         return NO;
@@ -81,6 +83,7 @@ static BOOL FGLoadPlanes(CGImageRef src, FGPlanes *out) {
 static CGImageRef FGStorePlanes(FGPlanes *p, const float *shape) {
     const int n = p->n;
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    if (!cs) return NULL;
     CGContextRef c = CGBitmapContextCreate(NULL, n, n, 8, 0, cs,
                                            kCGBitmapByteOrder32Little |
                                            kCGImageAlphaPremultipliedFirst);
@@ -88,6 +91,7 @@ static CGImageRef FGStorePlanes(FGPlanes *p, const float *shape) {
     if (!c) return NULL;
 
     uint8_t *data = CGBitmapContextGetData(c);
+    if (!data) { CGContextRelease(c); return NULL; }
     size_t stride = CGBitmapContextGetBytesPerRow(c);
 
     for (int y = 0; y < n; y++) {
@@ -119,26 +123,22 @@ static CGImageRef FGStorePlanes(FGPlanes *p, const float *shape) {
 
 #pragma mark - 入口
 
-CGImageRef NGCreateGlassIconContent(id catalog, NSString *name, uint32_t appearance, size_t px) {
-    FGGNoEdge = YES;                       // 原版语义：关闭 chiclet 高光（只留描边）
-    CGImageRef img = NGCreateGlassIcon(catalog, name, appearance, px);
-    FGGNoEdge = NO;
-    return img;
-}
-
 // [v1 近似] 用分层资源先做扁平重建，再叠形状描边 / chiclet 高光。
-CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, size_t px) {
+// gGlassNoEdge 的语义保持为逐次调用参数，避免并发渲染互相改变高光。
+static CGImageRef FGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance,
+                                        size_t px, BOOL suppressChiclet) {
     CGImageRef flat = NGCreateFlatIcon(catalog, name, appearance, px);
     if (!flat) return NULL;
 
     FGPlanes planes = {0};
-    if (!FGLoadPlanes(flat, &planes)) { CGImageRelease(flat); return flat; }
+    BOOL loaded = FGLoadPlanes(flat, &planes);
     CGImageRelease(flat);
+    if (!loaded) return NULL;   // 由调用方回退到系统图标
 
     const int n = planes.n;
     float *shape = FGIconShape(n);
     if (shape) {
-        if (!FGGNoEdge) FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
+        if (!suppressChiclet) FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
         // style <= 0.2 -> 白色描边；宽度由 n 自动推出（n/768 半宽）
         FGDrawOutline(planes.rgb, planes.alpha, shape, n, /*style=*/0.1f, 0.0f);
     }
@@ -147,14 +147,22 @@ CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, si
     free(shape);
     free(planes.rgb);
     free(planes.alpha);
-    return out ?: NULL;
+    return out;
+}
+
+CGImageRef NGCreateGlassIconContent(id catalog, NSString *name, uint32_t appearance, size_t px) {
+    return FGCreateGlassIcon(catalog, name, appearance, px, YES);
+}
+
+CGImageRef NGCreateGlassIcon(id catalog, NSString *name, uint32_t appearance, size_t px) {
+    return FGCreateGlassIcon(catalog, name, appearance, px, NO);
 }
 
 // [v1 近似] 只描边
 CGImageRef NGCreateRimmedImage(CGImageRef src) {
-    if (!src) return NULL;
+    if (!src || CGImageGetWidth(src) < 8) return NULL;
     FGPlanes planes = {0};
-    if (!FGLoadPlanes(src, &planes)) return CGImageRetain(src);
+    if (!FGLoadPlanes(src, &planes)) return NULL;
 
     const int n = planes.n;
     float *shape = FGIconShape(n);
@@ -170,16 +178,15 @@ CGImageRef NGCreateRimmedImage(CGImageRef src) {
 }
 
 // [v1 近似] 通用玻璃化
-CGImageRef NGCreateGlassedImage(CGImageRef src, int flag) {
-    (void)flag;
-    if (!src) return NULL;
+CGImageRef NGCreateGlassedImage(CGImageRef src) {
+    if (!src || CGImageGetWidth(src) < 16) return NULL;
     FGPlanes planes = {0};
-    if (!FGLoadPlanes(src, &planes)) return CGImageRetain(src);
+    if (!FGLoadPlanes(src, &planes)) return NULL;
 
     const int n = planes.n;
     float *shape = FGIconShape(n);
     if (shape) {
-        if (!FGGNoEdge) FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
+        FGDrawChicletHighlights(planes.rgb, planes.alpha, n);
         FGDrawOutline(planes.rgb, planes.alpha, shape, n, 0.1f, 0.0f);
     }
     CGImageRef out = FGStorePlanes(&planes, shape);

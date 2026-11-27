@@ -315,7 +315,7 @@ BOOL FGDrawElement(CGContextRef c, FGDrawContext *ctx, id catalog,
                                     (double)((int64_t)h - 1 - maxY),
                                     (double)(maxX - minX + 1),
                                     (double)(maxY - minY + 1));
-            frame = CGRectStandardize(CGRectApplyAffineTransform(box, &inv));
+            frame = CGRectStandardize(CGRectApplyAffineTransform(box, inv));
         }
 
         CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();

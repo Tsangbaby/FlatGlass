@@ -1,11 +1,32 @@
 #!/bin/sh
-set -e
-prefix='/var/jb'
-PATH="$prefix/usr/bin:$prefix/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-job="$prefix/Library/LaunchDaemons/local.lumid.flatglass.plist"
-case "$1" in
-  remove|deconfigure) "$prefix/usr/libexec/flatglass" --disable ;;
+set -eu
+
+case "${1:-}" in
+  remove|deconfigure|upgrade|failed-upgrade) ;;
+  *) exit 0 ;;
 esac
-launchctl bootout user/foreground/local.lumid.flatglass >/dev/null 2>&1 ||
-  launchctl bootout system/local.lumid.flatglass >/dev/null 2>&1 ||
-  launchctl unload "$job" >/dev/null 2>&1 || true
+
+# Bootstrap commands use jbroot-relative paths in the native package.
+prefix=''
+PATH="$prefix/usr/bin:$prefix/bin:$prefix/usr/sbin:$prefix/sbin${prefix:+:/usr/bin:/bin:/usr/sbin:/sbin}"
+export PATH
+label=local.lumid.flatglass
+job="$prefix/Library/LaunchDaemons/$label.plist"
+
+# Stop the watcher first so it can't republish the saved mode after --disable.
+stopped=0
+launchctl bootout "system/$label" >/dev/null 2>&1 && stopped=1
+launchctl bootout "user/foreground/$label" >/dev/null 2>&1 && stopped=1
+if [ "$stopped" = 0 ]; then
+  launchctl unload "$job" >/dev/null 2>&1 || :
+fi
+
+case "$1" in
+  remove|deconfigure)
+    # Disable the live effect and clean up without overwriting saved Mode.
+    if ! "$prefix/usr/libexec/flatglass" --disable; then
+      printf '%s\n' 'FlatGlass: --disable failed; continuing package removal.' >&2
+    fi
+    ;;
+esac
+exit 0

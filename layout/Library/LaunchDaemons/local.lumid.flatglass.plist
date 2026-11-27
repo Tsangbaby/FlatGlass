@@ -12,7 +12,7 @@
 	<string>Background</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/var/jb/usr/libexec/flatglass</string>
+		<string>/usr/libexec/flatglass</string>
 		<string>--watch</string>
 	</array>
 	<key>RunAtLoad</key>
